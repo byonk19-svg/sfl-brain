@@ -6,11 +6,15 @@ import { redirect } from "next/navigation";
 import { createBrainService } from "@/lib/brain";
 import {
   affiliateLinkSchema,
+  createOpportunitySchema,
   createProductSchema,
+  editOpportunitySchema,
   editProductSchema,
   formString,
   formStrings,
   listingSchema,
+  opportunityAssetSchema,
+  opportunityProductSchema,
   radarEventSchema,
   recordPostSchema,
 } from "@/lib/validation";
@@ -29,7 +33,7 @@ function messageUrl(path: string, kind: "error" | "success", message: string) {
 }
 
 export async function createProductAction(formData: FormData) {
-  let destination = "/add";
+  let destination = "/products/new";
   try {
     const input = createProductSchema.parse({
       name: formString(formData, "name"),
@@ -50,7 +54,174 @@ export async function createProductAction(formData: FormData) {
     revalidatePath("/library");
     destination = messageUrl(`/products/${id}`, "success", "Product added to the Brain.");
   } catch (error) {
+    destination = messageUrl("/products/new", "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function createContentOpportunityAction(formData: FormData) {
+  let destination = "/add";
+  try {
+    const input = createOpportunitySchema.parse({
+      title: formString(formData, "title"),
+      status: formString(formData, "status") || "idea",
+      content_type:
+        formString(formData, "content_type") || "standalone_product",
+      media_format: formString(formData, "media_format"),
+      notes: formString(formData, "notes"),
+      next_action: formString(formData, "next_action"),
+      estimated_minutes_remaining: formString(
+        formData,
+        "estimated_minutes_remaining",
+      ),
+      product_ids: formStrings(formData, "product_ids"),
+      asset_ids: formStrings(formData, "asset_ids"),
+    });
+    const id = await createBrainService().createContentOpportunity(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    destination = messageUrl(
+      `/opportunities/${id}`,
+      "success",
+      "Content saved to the backlog.",
+    );
+  } catch (error) {
     destination = messageUrl("/add", "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function editContentOpportunityAction(formData: FormData) {
+  const id = formString(formData, "id");
+  let destination = `/opportunities/${id}`;
+  try {
+    const input = editOpportunitySchema.parse({
+      id,
+      title: formString(formData, "title"),
+      status: formString(formData, "status"),
+      content_type: formString(formData, "content_type"),
+      media_format: formString(formData, "media_format"),
+      notes: formString(formData, "notes"),
+      next_action: formString(formData, "next_action"),
+      estimated_minutes_remaining: formString(
+        formData,
+        "estimated_minutes_remaining",
+      ),
+    });
+    await createBrainService().updateContentOpportunity(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Content stage updated.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function attachOpportunityProductAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = opportunityProductSchema.parse({
+      opportunity_id: opportunityId,
+      product_id: formString(formData, "product_id"),
+      role: formString(formData, "role") || "supporting",
+    });
+    await createBrainService().attachOpportunityProduct(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Product attached.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function detachOpportunityProductAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = opportunityProductSchema.parse({
+      opportunity_id: opportunityId,
+      product_id: formString(formData, "product_id"),
+      role: "supporting",
+    });
+    await createBrainService().detachOpportunityProduct(
+      input.opportunity_id,
+      input.product_id,
+    );
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Product removed.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function attachOpportunityAssetAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = opportunityAssetSchema.parse({
+      opportunity_id: opportunityId,
+      asset_id: formString(formData, "asset_id"),
+      role: formString(formData, "role") || "supporting",
+    });
+    await createBrainService().attachOpportunityAsset(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Asset attached.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function detachOpportunityAssetAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = opportunityAssetSchema.parse({
+      opportunity_id: opportunityId,
+      asset_id: formString(formData, "asset_id"),
+      role: "supporting",
+    });
+    await createBrainService().detachOpportunityAsset(
+      input.opportunity_id,
+      input.asset_id,
+    );
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Asset removed.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function setOpportunityArchivedAction(formData: FormData) {
+  const id = formString(formData, "opportunity_id");
+  const archived = formString(formData, "archived") === "true";
+  let destination = `/opportunities/${id}`;
+  try {
+    const validId = editOpportunitySchema.shape.id.parse(id);
+    await createBrainService().setContentOpportunityArchived(validId, archived);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(
+      destination,
+      "success",
+      archived ? "Content archived. You can restore it here." : "Content restored to the backlog.",
+    );
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
   }
   redirect(destination);
 }
@@ -171,6 +342,10 @@ export async function recordPostAction(formData: FormData) {
   let destination = "/record-post";
   try {
     const input = recordPostSchema.parse({
+      content_opportunity_id: formString(
+        formData,
+        "content_opportunity_id",
+      ),
       destination_id: formString(formData, "destination_id"),
       product_ids: formStrings(formData, "product_ids"),
       asset_ids: formStrings(formData, "asset_ids"),
@@ -184,6 +359,7 @@ export async function recordPostAction(formData: FormData) {
     revalidatePath("/today");
     revalidatePath("/library");
     for (const id of input.product_ids) revalidatePath(`/products/${id}`);
+    revalidatePath(`/opportunities/${input.content_opportunity_id}`);
     destination = messageUrl("/today", "success", "Post recorded. Recommendations have been reranked.");
   } catch (error) {
     destination = messageUrl("/record-post", "error", errorMessage(error));

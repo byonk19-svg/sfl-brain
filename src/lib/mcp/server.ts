@@ -1,18 +1,23 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import type { TodayCandidate, TodayFilters } from "@/lib/recommendations";
+import type {
+  TodayContentCandidate,
+  TodayContentFilters,
+} from "@/lib/content-recommendations";
 
 type JsonRecord = Record<string, unknown>;
 
 export interface BrainReader {
-  getTodayCandidates(filters: TodayFilters): Promise<TodayCandidate[]>;
+  getTodayCandidates(filters: TodayContentFilters): Promise<TodayContentCandidate[]>;
+  searchContentBacklog(query: string, limit: number): Promise<JsonRecord[]>;
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
     destinationId?: string;
+    contentOpportunityId?: string;
   }): Promise<JsonRecord[]>;
   getRevivalEvents(activeOnly: boolean, limit: number): Promise<JsonRecord[]>;
 }
@@ -53,7 +58,7 @@ function failure(error: unknown) {
 
 export function createSflMcpServer(reader: BrainReader) {
   const server = new McpServer(
-    { name: "sfl-brain", version: "0.1.0" },
+    { name: "sfl-brain", version: "0.2.0" },
     {
       instructions:
         "Read-only facts and deterministic recommendations for Styled For Less. Use these tools to ground editorial judgment; never imply that the Brain publishes or monitors retailers.",
@@ -67,8 +72,10 @@ export function createSflMcpServer(reader: BrainReader) {
       description:
         "Use when the user asks what to post today, wants a quick or low-effort post, asks what is worth resurfacing, or wants to compare available posting opportunities.",
       inputSchema: z.object({
-        max_effort_minutes: z.number().int().positive().max(30).optional(),
+        max_effort_minutes: z.number().int().positive().max(480).optional(),
         no_new_photos: z.boolean().optional(),
+        candidate_type: z.literal("revival").optional(),
+        sort: z.enum(["best", "closest_to_done"]).optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
       annotations: readOnlyAnnotations,
@@ -93,7 +100,8 @@ export function createSflMcpServer(reader: BrainReader) {
     "search_sfl_library",
     {
       title: "Search SFL Library",
-      description: "Search stored products by product name, brand, retailer, or tag.",
+      description:
+        "Search content opportunities and underlying products by opportunity title, stage, next action, product name, brand, retailer, or tag.",
       inputSchema: z.object({
         query: z.string().trim().min(1).max(200),
         limit: z.number().int().min(1).max(100).default(20),
@@ -102,8 +110,23 @@ export function createSflMcpServer(reader: BrainReader) {
     },
     async ({ query, limit }) => {
       try {
-        const products = sanitize(await reader.searchLibrary(query, limit));
-        return success("products", products, `Library matches for “${query}”.`);
+        const [opportunities, products] = await Promise.all([
+          reader.searchContentBacklog(query, limit),
+          reader.searchLibrary(query, limit),
+        ]);
+        const safeResults = sanitize({ opportunities, products }) as {
+          opportunities: JsonRecord[];
+          products: JsonRecord[];
+        };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Library matches for “${query}”: ${opportunities.length} content opportunities and ${products.length} products.\n\n${JSON.stringify(safeResults, null, 2)}`,
+            },
+          ],
+          structuredContent: safeResults,
+        };
       } catch (error) {
         return failure(error);
       }
@@ -140,16 +163,18 @@ export function createSflMcpServer(reader: BrainReader) {
         days: z.number().int().min(1).max(3650).default(30),
         product_id: z.uuid().optional(),
         destination_id: z.uuid().optional(),
+        content_opportunity_id: z.uuid().optional(),
       }),
       annotations: readOnlyAnnotations,
     },
-    async ({ days, product_id, destination_id }) => {
+    async ({ days, product_id, destination_id, content_opportunity_id }) => {
       try {
         const posts = sanitize(
           await reader.getRecentPosts({
             days,
             productId: product_id,
             destinationId: destination_id,
+            contentOpportunityId: content_opportunity_id,
           }),
         );
         return success("posts", posts, `Posts published in the last ${days} days.`);

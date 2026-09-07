@@ -15,6 +15,114 @@ const optionalPrice = z.preprocess(
   z.number().nonnegative().max(99_999_999).optional(),
 );
 
+const optionalMinutes = z.preprocess(
+  (value) =>
+    value === "" || value === null || value === undefined
+      ? undefined
+      : Number(value),
+  z.number().int().min(0).max(480).optional(),
+);
+
+const uuidList = z.preprocess(
+  (value) => (Array.isArray(value) ? value : value ? [value] : []),
+  z.array(z.uuid()).max(100).transform((values) => [...new Set(values)]),
+);
+
+export const opportunityStatusSchema = z.enum([
+  "idea",
+  "needs_assets",
+  "needs_links",
+  "needs_caption",
+  "ready",
+  "posted",
+  "revival_candidate",
+]);
+
+export const contentTypeSchema = z.enum([
+  "comparison",
+  "in_store_find",
+  "styled_at_home",
+  "sale_restock",
+  "collection_roundup",
+  "standalone_product",
+  "lifestyle_shop_the_look",
+  "recommendation_response",
+  "reel_video",
+]);
+
+export const mediaFormatSchema = z.enum([
+  "single_image",
+  "carousel",
+  "canva_graphic",
+  "reel_video",
+  "other",
+]);
+
+export const createOpportunitySchema = z
+  .object({
+    title: z.string().trim().min(1, "What are you working on?").max(200),
+    status: opportunityStatusSchema.default("idea"),
+    content_type: contentTypeSchema.default("standalone_product"),
+    media_format: z.preprocess(
+      (value) => (value === "" || value === null ? undefined : value),
+      mediaFormatSchema.optional(),
+    ),
+    notes: optionalText,
+    next_action: optionalText,
+    estimated_minutes_remaining: optionalMinutes,
+    product_ids: uuidList,
+    asset_ids: uuidList,
+  })
+  .superRefine((value, context) => {
+    if (["posted", "revival_candidate"].includes(value.status)) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Use Record Post before choosing a published stage",
+      });
+    }
+  })
+  .transform((value) => ({
+    ...value,
+    next_action:
+      value.next_action ??
+      {
+        idea: "Decide the next step",
+        needs_assets: "Take pictures",
+        needs_links: "Prepare affiliate links",
+        needs_caption: "Write the caption",
+        ready: "Publish",
+        posted: "",
+        revival_candidate: "Refresh the content",
+      }[value.status],
+  }));
+
+export const editOpportunitySchema = z.object({
+  id: z.uuid(),
+  title: z.string().trim().min(1).max(200),
+  status: opportunityStatusSchema,
+  content_type: contentTypeSchema,
+  media_format: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    mediaFormatSchema.optional(),
+  ),
+  notes: optionalText,
+  next_action: optionalText,
+  estimated_minutes_remaining: optionalMinutes,
+});
+
+export const opportunityProductSchema = z.object({
+  opportunity_id: z.uuid(),
+  product_id: z.uuid(),
+  role: z.enum(["primary", "supporting", "comparison"]).default("supporting"),
+});
+
+export const opportunityAssetSchema = z.object({
+  opportunity_id: z.uuid(),
+  asset_id: z.uuid(),
+  role: z.enum(["primary", "supporting", "comparison"]).default("supporting"),
+});
+
 const tags = z.preprocess((value) => {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
@@ -98,8 +206,11 @@ export const radarEventSchema = z.object({
 });
 
 export const recordPostSchema = z.object({
+  content_opportunity_id: z.uuid({
+    error: "Choose a content opportunity",
+  }),
   destination_id: z.uuid(),
-  product_ids: z.array(z.uuid()).min(1, "Choose at least one product"),
+  product_ids: z.array(z.uuid()).default([]),
   asset_ids: z.array(z.uuid()).default([]),
   published_at: z.string().min(1).transform((value) => new Date(value).toISOString()),
   caption: optionalText,

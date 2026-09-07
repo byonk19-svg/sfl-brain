@@ -46,6 +46,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pa
   const postJoins = records(product.post_products);
   const posts = postJoins.map((join) => record(join.posts)).sort((a, b) => text(b.published_at).localeCompare(text(a.published_at)));
   const radarEvents = records(product.radar_events).sort((a, b) => text(b.happened_at).localeCompare(text(a.happened_at)));
+  const opportunityJoins = records(product.content_opportunity_products);
   const success = Array.isArray(query.success) ? query.success[0] : query.success;
   const error = Array.isArray(query.error) ? query.error[0] : query.error;
 
@@ -80,6 +81,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pa
             <details className="inline-editor"><summary>Add Radar event</summary><form action={addRadarEventAction} className="compact-form single-column"><input type="hidden" name="product_id" value={id} /><label>Signal<select name="event_type"><option value="restock">Restock</option><option value="price_drop">Price drop</option><option value="sale">Sale</option><option value="seasonal">Seasonal</option><option value="manual_trend">Manual trend</option><option value="commission_boost">Commission boost</option></select></label><label>Listing<select name="listing_id" defaultValue=""><option value="">Product-level</option>{listings.map((listing) => <option value={text(listing.id)} key={text(listing.id)}>{text(listing.retailer)}</option>)}</select></label><label>Happened at<input name="happened_at" type="datetime-local" required defaultValue={localDateTime()} /></label><label>Expires at<input name="expires_at" type="datetime-local" /></label><SubmitButton>Add signal</SubmitButton></form></details>
           </section>
           <section className="aside-section"><span className="eyebrow">Notes</span><p>{text(product.notes) || "No notes yet."}</p><div className="chip-row">{(Array.isArray(product.tags) ? product.tags : []).map((tag) => <span className="chip" key={text(tag)}>{text(tag)}</span>)}</div></section>
+          <section className="aside-section product-opportunities"><span className="eyebrow">Content opportunities</span>{opportunityJoins.length ? opportunityJoins.map((join) => { const opportunity = record(join.content_opportunities); return <Link className="related-opportunity" href={`/opportunities/${text(opportunity.id)}`} key={text(opportunity.id)}><strong>{text(opportunity.title)}</strong><span>{humanize(text(opportunity.status))} · {humanize(text(join.role))}</span></Link>; }) : <p>Not attached to content yet.</p>}</section>
         </aside>
       </div>
 
