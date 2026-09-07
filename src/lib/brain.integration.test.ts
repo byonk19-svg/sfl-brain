@@ -110,4 +110,35 @@ integration("local Supabase integration", () => {
     await brain.setContentOpportunityArchived(id, false);
     expect(await brain.searchContentBacklog(title, 10)).toHaveLength(1);
   });
+
+  it("uploads and attaches an asset directly to a product-free opportunity", async () => {
+    const brain = createBrainService();
+    const id = await brain.createContentOpportunity({
+      title: `Asset integration ${crypto.randomUUID()}`,
+      status: "needs_assets",
+      content_type: "lifestyle_shop_the_look",
+      media_format: "single_image",
+      notes: undefined,
+      next_action: "Take pictures",
+      estimated_minutes_remaining: 30,
+      product_ids: [],
+      asset_ids: [],
+    });
+    const assetId = await brain.uploadAsset({
+      opportunityId: id,
+      title: "Product-free content photo",
+      source: "home",
+      file: new File([new Uint8Array([137, 80, 78, 71])], "content.png", {
+        type: "image/png",
+      }),
+    });
+
+    expect(await brain.getOpportunityContext(id)).toMatchObject({
+      content_opportunity_assets: expect.arrayContaining([
+        expect.objectContaining({
+          assets: expect.objectContaining({ id: assetId }),
+        }),
+      ]),
+    });
+  });
 });

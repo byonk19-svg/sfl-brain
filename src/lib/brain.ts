@@ -471,18 +471,25 @@ export class BrainService {
   }
 
   async uploadAsset(options: {
-    productId: string;
+    productId?: string;
+    opportunityId?: string;
     title?: string;
     source: "home" | "in_store" | "canva" | "web" | "other";
     file: File;
   }) {
+    if (!options.productId && !options.opportunityId) {
+      throw new Error("Choose a product or content opportunity for this asset.");
+    }
     if (!["home", "in_store", "canva", "web", "other"].includes(options.source)) {
       throw new Error("Choose a valid asset source.");
     }
     const validationError = validateUpload(options.file);
     if (validationError) throw new Error(validationError);
     const extension = options.file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
-    const storagePath = `${this.workspaceId}/${options.productId}/${crypto.randomUUID()}.${extension}`;
+    const ownerPath = options.productId
+      ? `products/${options.productId}`
+      : `opportunities/${options.opportunityId}`;
+    const storagePath = `${this.workspaceId}/${ownerPath}/${crypto.randomUUID()}.${extension}`;
     const upload = await this.client.storage.from("sfl-assets").upload(storagePath, options.file, {
       contentType: options.file.type,
       upsert: false,
@@ -507,17 +514,26 @@ export class BrainService {
           .single(),
         "Save asset metadata",
       ) as { id: string };
-      const join = await this.client.from("asset_products").insert({
-        asset_id: asset.id,
-        product_id: options.productId,
-        role: "primary",
-      });
-      if (join.error) {
-        await this.client.from("assets").delete().eq("id", asset.id);
-        throw new Error(`Associate asset: ${join.error.message}`);
+      if (options.productId) {
+        const join = await this.client.from("asset_products").insert({
+          asset_id: asset.id,
+          product_id: options.productId,
+          role: "primary",
+        });
+        if (join.error) {
+          throw new Error(`Associate asset with product: ${join.error.message}`);
+        }
+      }
+      if (options.opportunityId) {
+        await this.attachOpportunityAsset({
+          opportunity_id: options.opportunityId,
+          asset_id: asset.id,
+          role: "primary",
+        });
       }
       return asset.id;
     } catch (error) {
+      await this.client.from("assets").delete().eq("storage_path", storagePath);
       await this.client.storage.from("sfl-assets").remove([storagePath]);
       throw error;
     }

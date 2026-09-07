@@ -8,6 +8,7 @@ import {
   detachOpportunityProductAction,
   editContentOpportunityAction,
   setOpportunityArchivedAction,
+  uploadOpportunityAssetAction,
 } from "@/app/actions";
 import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
@@ -102,7 +103,8 @@ export default async function OpportunityPage({
           <section className="detail-section">
             <div className="section-heading"><span>02</span><h2>Prepared assets</h2></div>
             {assetJoins.length ? <div className="asset-grid">{assetJoins.map((join) => { const asset = record(join.assets); return <article className="asset-item" key={text(asset.id)}><div className="asset-placeholder">{humanize(text(asset.asset_type))}</div><strong>{text(asset.title) || "Untitled asset"}</strong><span>{humanize(text(join.role))}</span><form action={detachOpportunityAssetAction}><input type="hidden" name="opportunity_id" value={id} /><input type="hidden" name="asset_id" value={text(asset.id)} /><button className="text-button" type="submit">Remove</button></form></article>; })}</div> : <p className="muted">No prepared assets are attached yet.</p>}
-            <details className="inline-editor"><summary>Attach an existing asset</summary>{availableAssets.length ? <form action={attachOpportunityAssetAction} className="compact-form"><input type="hidden" name="opportunity_id" value={id} /><label>Asset<select name="asset_id">{availableAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title ?? asset.asset_type}</option>)}</select></label><label>Role<select name="role" defaultValue={assetJoins.length ? "supporting" : "primary"}><option value="primary">Primary</option><option value="supporting">Supporting</option><option value="comparison">Comparison</option></select></label><SubmitButton>Attach asset</SubmitButton></form> : <p className="muted">No other assets are available. Upload one from a product detail page first.</p>}</details>
+            <details className="inline-editor"><summary>Attach an existing asset</summary>{availableAssets.length ? <form action={attachOpportunityAssetAction} className="compact-form"><input type="hidden" name="opportunity_id" value={id} /><label>Asset<select name="asset_id">{availableAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title ?? asset.asset_type}</option>)}</select></label><label>Role<select name="role" defaultValue={assetJoins.length ? "supporting" : "primary"}><option value="primary">Primary</option><option value="supporting">Supporting</option><option value="comparison">Comparison</option></select></label><SubmitButton>Attach asset</SubmitButton></form> : <p className="muted">No other assets are available. Upload a new one below.</p>}</details>
+            <details className="inline-editor"><summary>Upload a new asset</summary><form action={uploadOpportunityAssetAction} className="compact-form"><input type="hidden" name="opportunity_id" value={id} /><label>File<input type="file" name="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" required /></label><label>Title<input name="title" /></label><label>Source<select name="source" defaultValue="home"><option value="home">Home</option><option value="in_store">In store</option><option value="canva">Canva</option><option value="web">Web</option><option value="other">Other</option></select></label><SubmitButton>Upload asset</SubmitButton></form></details>
           </section>
 
           <section className="detail-section">

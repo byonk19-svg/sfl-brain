@@ -338,6 +338,29 @@ export async function uploadAssetAction(formData: FormData) {
   redirect(destination);
 }
 
+export async function uploadOpportunityAssetAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const validId = editOpportunitySchema.shape.id.parse(opportunityId);
+    const file = formData.get("file");
+    if (!(file instanceof File)) throw new Error("Choose a file to upload.");
+    await createBrainService().uploadAsset({
+      opportunityId: validId,
+      title: formString(formData, "title"),
+      source: formString(formData, "source") as "home" | "in_store" | "canva" | "web" | "other",
+      file,
+    });
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Private asset uploaded and attached.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
 export async function recordPostAction(formData: FormData) {
   let destination = "/record-post";
   try {
