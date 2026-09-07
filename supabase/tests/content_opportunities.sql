@@ -20,6 +20,23 @@ begin
   if has_table_privilege('anon', 'public.content_opportunities', 'select') then
     raise exception 'Anonymous role must not read content opportunities';
   end if;
+  if not exists (
+    select 1 from pg_enum
+    where enumtypid = 'public.content_opportunity_type'::regtype
+      and enumlabel = 'unspecified'
+  ) or exists (
+    select 1 from pg_enum
+    where enumtypid = 'public.content_opportunity_type'::regtype
+      and enumlabel = 'reel_video'
+  ) then
+    raise exception 'Content opportunity types must use unspecified, not reel_video';
+  end if;
+  if (select column_default from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'content_opportunities'
+        and column_name = 'content_type') not like '%unspecified%' then
+    raise exception 'Content opportunity captures must default to unspecified';
+  end if;
 
   v_opportunity_id := public.create_content_opportunity(
     '11111111-1111-4111-8111-111111111111',

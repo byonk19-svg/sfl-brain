@@ -27,6 +27,12 @@ describe("form validation", () => {
     });
   });
 
+  it("defaults a quick capture to an unspecified editorial type", () => {
+    expect(
+      createOpportunitySchema.parse({ title: "Home Depot hallway light" }),
+    ).toMatchObject({ content_type: "unspecified" });
+  });
+
   it("prevents manually declaring unrecorded content as posted", () => {
     expect(() =>
       createOpportunitySchema.parse({

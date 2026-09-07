@@ -13,6 +13,7 @@ export interface BrainReader {
   searchContentBacklog(query: string, limit: number): Promise<JsonRecord[]>;
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
+  getOpportunityContext(opportunityId: string): Promise<JsonRecord | null>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
@@ -58,7 +59,7 @@ function failure(error: unknown) {
 
 export function createSflMcpServer(reader: BrainReader) {
   const server = new McpServer(
-    { name: "sfl-brain", version: "0.2.0" },
+    { name: "sfl-brain", version: "0.2.1" },
     {
       instructions:
         "Read-only facts and deterministic recommendations for Styled For Less. Use these tools to ground editorial judgment; never imply that the Brain publishes or monitors retailers.",
@@ -148,6 +149,31 @@ export function createSflMcpServer(reader: BrainReader) {
         if (!product) return failure(new Error("Product not found"));
         const safeProduct = sanitize(product);
         return success("product", safeProduct, `Complete stored context for ${String(product.name ?? "this product")}.`);
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_content_opportunity_context",
+    {
+      title: "Get Content Opportunity Context",
+      description:
+        "Get a content opportunity's stage, editorial notes, attached products and links, prepared assets, publication and destination history, metrics, and Revival Radar events.",
+      inputSchema: z.object({ opportunity_id: z.uuid() }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ opportunity_id }) => {
+      try {
+        const opportunity = await reader.getOpportunityContext(opportunity_id);
+        if (!opportunity) return failure(new Error("Content opportunity not found"));
+        const safeOpportunity = sanitize(opportunity);
+        return success(
+          "opportunity",
+          safeOpportunity,
+          `Complete stored context for ${String(opportunity.title ?? "this content opportunity")}.`,
+        );
       } catch (error) {
         return failure(error);
       }

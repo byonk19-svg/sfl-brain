@@ -30,7 +30,8 @@ export function ContentCaptureForm({
         </label>
         <label>
           What kind of content is it?
-          <select name="content_type" defaultValue="standalone_product">
+          <select name="content_type" defaultValue="unspecified">
+            <option value="unspecified">Not sure yet</option>
             <option value="standalone_product">Standalone product find</option>
             <option value="comparison">Comparison / dupe</option>
             <option value="in_store_find">In-store find</option>
@@ -39,7 +40,6 @@ export function ContentCaptureForm({
             <option value="collection_roundup">Collection / roundup</option>
             <option value="lifestyle_shop_the_look">Lifestyle / shop the look</option>
             <option value="recommendation_response">Recommendation / response</option>
-            <option value="reel_video">Reel / video</option>
           </select>
         </label>
       </div>

@@ -12,7 +12,7 @@ describe("ContentCaptureForm", () => {
     expect(screen.getByLabelText("What are you working on?")).toBeRequired();
     expect(screen.getByLabelText("Where is it at?")).toHaveValue("idea");
     expect(screen.getByLabelText("What kind of content is it?")).toHaveValue(
-      "standalone_product",
+      "unspecified",
     );
     expect(screen.getByLabelText("Anything else?")).toBeInTheDocument();
     expect(screen.queryByLabelText("Retailer")).not.toBeInTheDocument();

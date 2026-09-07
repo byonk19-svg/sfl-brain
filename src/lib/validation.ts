@@ -47,7 +47,7 @@ export const contentTypeSchema = z.enum([
   "standalone_product",
   "lifestyle_shop_the_look",
   "recommendation_response",
-  "reel_video",
+  "unspecified",
 ]);
 
 export const mediaFormatSchema = z.enum([
@@ -62,7 +62,7 @@ export const createOpportunitySchema = z
   .object({
     title: z.string().trim().min(1, "What are you working on?").max(200),
     status: opportunityStatusSchema.default("idea"),
-    content_type: contentTypeSchema.default("standalone_product"),
+    content_type: contentTypeSchema.default("unspecified"),
     media_format: z.preprocess(
       (value) => (value === "" || value === null ? undefined : value),
       mediaFormatSchema.optional(),

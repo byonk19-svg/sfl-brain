@@ -10,6 +10,7 @@ try {
     "get_today_candidates",
     "search_sfl_library",
     "get_product_context",
+    "get_content_opportunity_context",
     "get_recent_posts",
     "get_revival_events",
   ];
@@ -39,6 +40,16 @@ try {
   }
   if (!Array.isArray(product.structuredContent.product.content_opportunity_products)) {
     throw new Error("Product context did not include related content opportunities");
+  }
+  const opportunity = await client.callTool({
+    name: "get_content_opportunity_context",
+    arguments: { opportunity_id: first.opportunity_id },
+  });
+  if (opportunity.isError || !opportunity.structuredContent?.opportunity) {
+    throw new Error("get_content_opportunity_context did not return structured opportunity context");
+  }
+  if (JSON.stringify(opportunity.structuredContent).includes("storage_path")) {
+    throw new Error("Content opportunity context exposed a private storage path");
   }
   const search = await client.callTool({
     name: "search_sfl_library",
@@ -78,6 +89,7 @@ try {
   console.log(`MCP tools: ${names.join(", ")}`);
   console.log(`Top opportunity: ${first.title}`);
   console.log(`Product context: ${product.structuredContent.product.name}`);
+  console.log(`Opportunity context: ${opportunity.structuredContent.opportunity.title}`);
   console.log(`Opportunity matches: ${search.structuredContent.opportunities.length}`);
   console.log(`Product matches: ${search.structuredContent.products.length}`);
   console.log(`Recent posts: ${recent.structuredContent.posts.length}`);

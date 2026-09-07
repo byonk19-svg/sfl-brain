@@ -36,6 +36,7 @@ describe("SFL Brain MCP server", () => {
       searchContentBacklog: async () => [{ id: candidate.opportunity_id, title: candidate.title }],
       searchLibrary: async () => [{ id: candidate.product_summary[0].id, name: candidate.product_summary[0].name }],
       getProductContext: async (id) => ({ id, name: candidate.product_summary[0].name, assets: [{ id: "asset", title: "Chair photo" }] }),
+      getOpportunityContext: async (id) => ({ id, title: candidate.title, content_type: candidate.content_type, content_opportunity_assets: [{ assets: { id: "asset", storage_path: "private/chair.jpg", signed_url: "https://example.test/signed" } }] }),
       getRecentPosts: async () => [{ id: "post", published_at: "2026-09-01T12:00:00Z" }],
       getRevivalEvents: async () => [{ id: "event", event_type: "restock", product: { id: candidate.product_summary[0].id, name: candidate.product_summary[0].name } }],
     };
@@ -51,13 +52,14 @@ describe("SFL Brain MCP server", () => {
     await server.close();
   });
 
-  it("registers exactly the five read-only, closed-world tools", async () => {
+  it("registers exactly the six read-only, closed-world tools", async () => {
     const listed = await client.listTools();
 
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "get_today_candidates",
       "search_sfl_library",
       "get_product_context",
+      "get_content_opportunity_context",
       "get_recent_posts",
       "get_revival_events",
     ]);
@@ -112,5 +114,18 @@ describe("SFL Brain MCP server", () => {
 
     expect(JSON.stringify(result.structuredContent)).not.toContain("storage_path");
     expect(result.structuredContent).toMatchObject({ product: { id: candidate.product_summary[0].id } });
+  });
+
+  it("returns sanitized complete context for a content opportunity", async () => {
+    const result = await client.callTool({
+      name: "get_content_opportunity_context",
+      arguments: { opportunity_id: candidate.opportunity_id },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      opportunity: { id: candidate.opportunity_id, title: candidate.title },
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("storage_path");
+    expect(JSON.stringify(result.structuredContent)).toContain("signed_url");
   });
 });

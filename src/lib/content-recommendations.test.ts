@@ -132,23 +132,67 @@ describe("content opportunity recommendation engine", () => {
     ]);
   });
 
-  it("applies a soft variety penalty only after a type repeats", () => {
+  it("orders editorial variety by an opportunity's first publication, not a later cross-post", () => {
+    const comparison = publishedOpportunity("comparison", 6);
+    comparison.posts.push({
+      id: "comparison-cross-post",
+      destinationId: "instagram",
+      destinationName: "Instagram",
+      publishedAt: day(1),
+      performanceLabel: "normal",
+    });
+    const styled = publishedOpportunity("styled_at_home", 2);
+
+    expect(getRecentContentMix([comparison, styled], 5)).toEqual([
+      {
+        opportunity_id: styled.opportunityId,
+        content_type: "styled_at_home",
+        published_at: day(2),
+      },
+      {
+        opportunity_id: comparison.opportunityId,
+        content_type: "comparison",
+        published_at: day(6),
+      },
+    ]);
+  });
+
+  it("applies escalating soft variety penalties without excluding a candidate", () => {
     const candidate = opportunity({ contentType: "comparison" });
     const oneComparison = getRecentContentMix([
       publishedOpportunity("comparison", 1),
       publishedOpportunity("styled_at_home", 2),
     ]);
-    const twoComparisons = getRecentContentMix([
+    const repeatedComparison = getRecentContentMix([
       publishedOpportunity("comparison", 1),
       publishedOpportunity("comparison", 2),
+      publishedOpportunity("comparison", 3),
       publishedOpportunity("in_store_find", 3),
     ]);
 
-    expect(scoreContentOpportunity(candidate, oneComparison, NOW).reasons).not.toContainEqual(
-      expect.objectContaining({ code: "recent_type_repetition" }),
+    expect(scoreContentOpportunity(candidate, oneComparison, NOW).reasons).toContainEqual(
+      expect.objectContaining({ code: "variety_immediate_repeat", points: -12 }),
     );
-    expect(scoreContentOpportunity(candidate, twoComparisons, NOW).reasons).toContainEqual(
-      expect.objectContaining({ code: "recent_type_repetition", points: -8 }),
+    expect(scoreContentOpportunity(candidate, repeatedComparison, NOW).reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "variety_immediate_repeat", points: -12 }),
+        expect.objectContaining({ code: "variety_two_of_last_three", points: -8 }),
+        expect.objectContaining({ code: "variety_repeated_last_five", points: -16 }),
+      ]),
+    );
+    expect(getTodayContentCandidates([candidate], {}, NOW)).toHaveLength(1);
+  });
+
+  it("does not apply variety penalties to an unspecified content type", () => {
+    const candidate = opportunity({ contentType: "unspecified" });
+    const history = getRecentContentMix([
+      publishedOpportunity("unspecified", 1),
+      publishedOpportunity("unspecified", 2),
+      publishedOpportunity("unspecified", 3),
+    ]);
+
+    expect(scoreContentOpportunity(candidate, history, NOW).reasons).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: expect.stringMatching(/^variety_/) })]),
     );
   });
 

@@ -24,7 +24,7 @@ export type ContentType =
   | "standalone_product"
   | "lifestyle_shop_the_look"
   | "recommendation_response"
-  | "reel_video";
+  | "unspecified";
 
 export type MediaFormat =
   | "single_image"
@@ -194,6 +194,14 @@ function latestPost(posts: OpportunityPostInput[]) {
   )[0];
 }
 
+function firstPost(posts: OpportunityPostInput[]) {
+  return [...posts].sort(
+    (a, b) =>
+      (validDate(a.publishedAt)?.valueOf() ?? 0) -
+      (validDate(b.publishedAt)?.valueOf() ?? 0),
+  )[0];
+}
+
 function daysSince(value: string, now: Date) {
   const date = validDate(value);
   return date ? Math.floor((now.getTime() - date.getTime()) / 86_400_000) : null;
@@ -232,13 +240,13 @@ export function getRecentContentMix(
 ): RecentContentMixItem[] {
   return opportunities
     .flatMap((opportunity) => {
-      const latest = latestPost(opportunity.posts);
-      return latest
+      const first = firstPost(opportunity.posts);
+      return first
         ? [
             {
               opportunity_id: opportunity.opportunityId,
               content_type: opportunity.contentType,
-              published_at: latest.publishedAt,
+              published_at: first.publishedAt,
             },
           ]
         : [];
@@ -352,16 +360,41 @@ export function scoreContentOpportunity(
     addReason(reasons, "quick_finish", "Can be finished in fifteen minutes", 5);
   }
 
-  const recentTypeCount = recentMix.filter(
+  const priorMix = recentMix.filter(
+    (item) => item.opportunity_id !== opportunity.opportunityId,
+  );
+  const recentTypeCount = priorMix.filter(
     (item) => item.content_type === opportunity.contentType,
   ).length;
-  if (recentTypeCount >= 2) {
-    addReason(
-      reasons,
-      "recent_type_repetition",
-      "This content type appeared repeatedly in the recent mix",
-      -8 * Math.min(recentTypeCount - 1, 3),
-    );
+  if (opportunity.contentType !== "unspecified") {
+    if (priorMix[0]?.content_type === opportunity.contentType) {
+      addReason(
+        reasons,
+        "variety_immediate_repeat",
+        "Matches the most recently published content type",
+        -12,
+      );
+    }
+    if (
+      priorMix.slice(0, 3).filter(
+        (item) => item.content_type === opportunity.contentType,
+      ).length >= 2
+    ) {
+      addReason(
+        reasons,
+        "variety_two_of_last_three",
+        "This content type appears twice in the last three posts",
+        -8,
+      );
+    }
+    if (recentTypeCount >= 3) {
+      addReason(
+        reasons,
+        "variety_repeated_last_five",
+        "This content type appears repeatedly in the recent mix",
+        -16,
+      );
+    }
   }
 
   const requiresNewPhotos =
