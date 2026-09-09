@@ -7,6 +7,9 @@ declare
   v_status public.content_opportunity_status;
   v_other_workspace uuid := extensions.gen_random_uuid();
   v_other_product uuid := extensions.gen_random_uuid();
+  v_development_request_id uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_development_opportunity_id uuid;
+  v_mcp_request_id uuid := 'b0000000-0000-4000-8000-000000000001';
 begin
   if (select count(*) from public.content_opportunities) < 10 then
     raise exception 'Expected at least ten seeded content opportunities';
@@ -20,6 +23,49 @@ begin
   if has_table_privilege('anon', 'public.content_opportunities', 'select') then
     raise exception 'Anonymous role must not read content opportunities';
   end if;
+
+  v_development_opportunity_id := public.create_development_test_content_opportunity(
+    '11111111-1111-4111-8111-111111111111',
+    v_development_request_id
+  );
+  if public.create_development_test_content_opportunity(
+    '11111111-1111-4111-8111-111111111111',
+    v_development_request_id
+  ) <> v_development_opportunity_id then
+    raise exception 'Development MCP test write must be idempotent';
+  end if;
+  if not exists (
+    select 1 from public.content_opportunities
+    where id = v_development_opportunity_id
+      and title = '[Development MCP test] ' || v_development_request_id::text
+      and status = 'idea'
+      and content_type = 'unspecified'
+  ) then
+    raise exception 'Development MCP test write did not create the fixed labeled record';
+  end if;
+
+  perform public.create_mcp_content_opportunity(
+    '11111111-1111-4111-8111-111111111111', v_mcp_request_id,
+    jsonb_build_object('title', 'Transactional MCP test', 'status', 'idea', 'content_type', 'unspecified')
+  );
+  begin
+    perform public.create_mcp_content_opportunity(
+      '11111111-1111-4111-8111-111111111111', v_mcp_request_id,
+      jsonb_build_object('title', 'Different payload', 'status', 'idea', 'content_type', 'unspecified')
+    );
+    raise exception 'MCP request ID payload conflict was accepted';
+  exception when others then
+    if sqlerrm = 'MCP request ID payload conflict was accepted' then raise; end if;
+  end;
+  begin
+    perform public.update_mcp_content_opportunity(
+      '11111111-1111-4111-8111-111111111111', extensions.gen_random_uuid(), extensions.gen_random_uuid(), now(),
+      jsonb_build_object('notes', 'must not persist'), jsonb_build_object('notes', 'must not persist')
+    );
+    raise exception 'Unknown opportunity update was accepted';
+  exception when others then
+    if sqlerrm = 'Unknown opportunity update was accepted' then raise; end if;
+  end;
   if not exists (
     select 1 from pg_enum
     where enumtypid = 'public.content_opportunity_type'::regtype

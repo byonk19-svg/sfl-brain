@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { createPilotOpportunitySchema, recordPilotPostSchema, updatePilotOpportunitySchema, type CreatePilotOpportunityInput, type RecordPilotPostInput, type UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 
 import type {
   TodayContentCandidate,
@@ -14,6 +15,11 @@ export interface BrainReader {
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
   getOpportunityContext(opportunityId: string): Promise<JsonRecord | null>;
+  createDevelopmentTestOpportunity?(requestId: string): Promise<string>;
+  getAvailableDestinations?(): Promise<JsonRecord[]>;
+  createPilotContentOpportunity?(input: CreatePilotOpportunityInput): Promise<JsonRecord>;
+  updatePilotContentOpportunity?(input: UpdatePilotOpportunityInput): Promise<JsonRecord>;
+  recordPilotPost?(input: RecordPilotPostInput): Promise<JsonRecord>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
@@ -25,6 +31,13 @@ export interface BrainReader {
 
 const readOnlyAnnotations = {
   readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const developmentWriteAnnotations = {
+  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
@@ -57,7 +70,10 @@ function failure(error: unknown) {
   };
 }
 
-export function createSflMcpServer(reader: BrainReader) {
+export function createSflMcpServer(
+  reader: BrainReader,
+  options: { enableDevelopmentTestWrite?: boolean; enablePilotWrites?: boolean } = {},
+) {
   const server = new McpServer(
     { name: "sfl-brain", version: "0.2.1" },
     {
@@ -96,6 +112,53 @@ export function createSflMcpServer(reader: BrainReader) {
       }
     },
   );
+
+  if (options.enableDevelopmentTestWrite) {
+    server.registerTool(
+      "create_development_test_opportunity",
+      {
+        title: "Create Development Test Opportunity",
+        description:
+          "Development-only write test. Creates one clearly labeled demo content opportunity for a caller-provided request ID; repeat calls with the same ID return the same record.",
+        inputSchema: z.object({ request_id: z.uuid() }),
+        annotations: developmentWriteAnnotations,
+      },
+      async ({ request_id }) => {
+        try {
+          if (!reader.createDevelopmentTestOpportunity) {
+            return failure(new Error("Development test writing is not configured"));
+          }
+          const opportunity = {
+            id: await reader.createDevelopmentTestOpportunity(request_id),
+          };
+          return success(
+            "opportunity",
+            opportunity,
+            "Development test opportunity saved. Use its ID with get_content_opportunity_context.",
+          );
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+  }
+
+  server.registerTool("get_available_destinations", {
+    title: "Get Available Destinations", description: "Read active posting destinations before recording an actual publication.", inputSchema: z.object({}), annotations: readOnlyAnnotations,
+  }, async () => { try { return success("destinations", await reader.getAvailableDestinations?.() ?? [], "Active posting destinations."); } catch (error) { return failure(error); } });
+
+  if (options.enablePilotWrites) {
+    const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
+    server.registerTool("create_content_opportunity", { title: "Save Content Idea", description: "Save a real content idea. Use only when the user asks to save it; products, links, and assets are optional.", inputSchema: createPilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.createPilotContentOpportunity) return unavailable("Create content opportunity"); const result = await reader.createPilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, saved_state: sanitize(saved) }, "Content idea saved."); } catch (error) { return failure(error); }
+    });
+    server.registerTool("update_content_opportunity", { title: "Update Content Progress", description: "Update explicitly supplied progress fields on a verified content opportunity. Use its latest updated_at from context; omitted fields remain unchanged and null clears only that field.", inputSchema: updatePilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.updatePilotContentOpportunity) return unavailable("Update content opportunity"); const result = await reader.updatePilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, changed_fields: result.changed_fields, saved_state: sanitize(saved) }, "Content progress saved."); } catch (error) { return failure(error); }
+    });
+    server.registerTool("record_post", { title: "Record Actual Publication", description: "Record one publication that already happened to one verified destination. This never publishes externally.", inputSchema: recordPilotPostSchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.recordPilotPost) return unavailable("Record post"); return success("publication", await reader.recordPilotPost(args), "Actual publication recorded."); } catch (error) { return failure(error); }
+    });
+  }
 
   server.registerTool(
     "search_sfl_library",

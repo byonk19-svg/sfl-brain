@@ -9,6 +9,7 @@ import {
   type TodayContentFilters,
 } from "@/lib/content-recommendations";
 import { OpportunityRepository } from "@/lib/opportunity-repository";
+import type { CreatePilotOpportunityInput, RecordPilotPostInput, UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 import {
   type RecommendationInput,
 } from "@/lib/recommendations";
@@ -320,10 +321,44 @@ export class BrainService {
     };
   }
 
+  async getAvailableDestinations(): Promise<JsonRecord[]> {
+    return assertResult(
+      await this.client.from("destinations").select("id,name,platform").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
+      "Load destinations",
+    ) as unknown as JsonRecord[];
+  }
+
+  async createPilotContentOpportunity(input: CreatePilotOpportunityInput) {
+    return assertResult(await this.client.rpc("create_mcp_content_opportunity", {
+      p_workspace_id: this.workspaceId, p_request_id: input.request_id, p_payload: input,
+    }), "Create conversational content opportunity") as JsonRecord;
+  }
+
+  async updatePilotContentOpportunity(input: UpdatePilotOpportunityInput) {
+    const { request_id, opportunity_id, expected_updated_at, ...patch } = input;
+    return assertResult(await this.client.rpc("update_mcp_content_opportunity", {
+      p_workspace_id: this.workspaceId, p_request_id: request_id, p_opportunity_id: opportunity_id,
+      p_expected_updated_at: expected_updated_at, p_patch: patch, p_payload: input,
+    }), "Update conversational content opportunity") as JsonRecord;
+  }
+
+  async recordPilotPost(input: RecordPilotPostInput) {
+    return assertResult(await this.client.rpc("record_mcp_post", {
+      p_workspace_id: this.workspaceId, p_request_id: input.request_id, p_opportunity_id: input.opportunity_id,
+      p_destination_id: input.destination_id, p_published_at: new Date(input.published_at).toISOString(),
+      p_asset_ids: input.asset_ids, p_caption: input.caption ?? null, p_angle: input.angle ?? null,
+      p_performance_label: input.performance_label, p_payload: input,
+    }), "Record conversational post") as JsonRecord;
+  }
+
   async createContentOpportunity(
     input: z.infer<typeof createOpportunitySchema>,
   ) {
     return this.opportunityRepository().create(input);
+  }
+
+  async createDevelopmentTestOpportunity(requestId: string) {
+    return this.opportunityRepository().createDevelopmentTestOpportunity(requestId);
   }
 
   async updateContentOpportunity(

@@ -6,7 +6,12 @@ import { createSflMcpServer } from "@/lib/mcp/server";
 export const dynamic = "force-dynamic";
 
 const handler = createMcpHandler(
-  () => createSflMcpServer(createBrainService()),
+  () =>
+    createSflMcpServer(createBrainService(), {
+      enablePilotWrites:
+        process.env.NODE_ENV === "development" &&
+        process.env.SFL_ENABLE_PILOT_WRITES === "1",
+    }),
   {
     legacy: "stateless",
   },

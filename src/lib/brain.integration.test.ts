@@ -141,4 +141,19 @@ integration("local Supabase integration", () => {
       ]),
     });
   });
+
+  it("idempotently creates one clearly labeled development test opportunity", async () => {
+    const brain = createBrainService();
+    const requestId = crypto.randomUUID();
+
+    const first = await brain.createDevelopmentTestOpportunity(requestId);
+    const retry = await brain.createDevelopmentTestOpportunity(requestId);
+
+    expect(retry).toBe(first);
+    expect(await brain.getOpportunityContext(first)).toMatchObject({
+      title: `[Development MCP test] ${requestId}`,
+      status: "idea",
+      content_type: "unspecified",
+    });
+  });
 });

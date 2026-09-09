@@ -15,6 +15,7 @@ function param(value: string | string[] | undefined) {
 export default async function TodayPage({ searchParams }: { searchParams: SearchParams }) {
   const query = await searchParams;
   const filter = param(query.filter) ?? "best";
+  const showAll = param(query.show) === "all";
   const filters =
     filter === "5"
       ? { max_effort_minutes: 5 }
@@ -63,8 +64,9 @@ export default async function TodayPage({ searchParams }: { searchParams: Search
       </div>
 
       {candidates.length ? (
+        <>
         <ol className="candidate-list">
-          {candidates.map((candidate, index) => (
+          {(showAll ? candidates : candidates.slice(0, 3)).map((candidate, index) => (
             <li className="candidate" key={candidate.opportunity_id}>
               <div className="rank" aria-label={`Rank ${index + 1}`}>{String(index + 1).padStart(2, "0")}</div>
               <div className="candidate-body">
@@ -73,7 +75,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Search
                     <span className={`candidate-type ${candidate.candidate_type}`}>{humanize(candidate.content_type)} · {humanize(candidate.status)}</span>
                     <h2><Link href={`/opportunities/${candidate.opportunity_id}`}>{candidate.title}</Link></h2>
                   </div>
-                  <span className="effort">{candidate.estimated_effort_minutes} min</span>
+                  <span className="effort">Est. {candidate.estimated_effort_minutes} min</span>
                 </div>
                 <div className="facts">
                   <span>{candidate.product_summary.length ? candidate.product_summary.map((product) => product.name).join(" + ") : "No product needed yet"}</span>
@@ -88,6 +90,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Search
                     .slice(0, 4)
                     .map((reason) => <li key={reason.code}>{reason.label}</li>)}
                 </ul>
+                {candidate.reasons.some((reason) => reason.points < 0) && <p className="candidate-caution">Caution: {candidate.reasons.filter((reason) => reason.points < 0).map((reason) => reason.label).join(" · ")}</p>}
                 <div className="candidate-foot">
                   <span>Last published: {formatDate(candidate.last_published_at)}{candidate.publication_summary.destination_count > 1 ? ` · ${candidate.publication_summary.destination_count} destinations` : ""}</span>
                   <details><summary>Score details</summary><p>{candidate.score} points · {candidate.reasons.map((reason) => `${reason.label} ${reason.points > 0 ? "+" : ""}${reason.points}`).join(" · ")}</p></details>
@@ -96,8 +99,10 @@ export default async function TodayPage({ searchParams }: { searchParams: Search
             </li>
           ))}
         </ol>
+        {candidates.length > 3 && <Link className="button button-quiet" href={showAll ? "/today" : `/today?filter=${filter}&show=all`}>{showAll ? "Show top three" : `Show ${candidates.length - 3} more`}</Link>}
+        </>
       ) : (
-        <section className="empty-state"><h2>No content matches this filter.</h2><p>Try Best next post, or capture the next idea in the backlog.</p><Link className="button" href="/add">Add content</Link></section>
+        <section className="empty-state"><h2>No content matches this filter.</h2><p>Constraints were not relaxed. See the closest options or capture the next idea.</p><Link className="button" href="/today?filter=closest">See closest options</Link> <Link className="button button-quiet" href="/add">Add content</Link></section>
       )}
     </div>
   );

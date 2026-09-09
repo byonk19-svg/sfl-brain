@@ -52,11 +52,12 @@ describe("SFL Brain MCP server", () => {
     await server.close();
   });
 
-  it("registers exactly the six read-only, closed-world tools", async () => {
+  it("registers the existing six read-only tools plus destination lookup", async () => {
     const listed = await client.listTools();
 
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "get_today_candidates",
+      "get_available_destinations",
       "search_sfl_library",
       "get_product_context",
       "get_content_opportunity_context",
@@ -127,5 +128,62 @@ describe("SFL Brain MCP server", () => {
     });
     expect(JSON.stringify(result.structuredContent)).not.toContain("storage_path");
     expect(JSON.stringify(result.structuredContent)).toContain("signed_url");
+  });
+
+  it("exposes an idempotent development test writer only when explicitly enabled", async () => {
+    let calls = 0;
+    const requestId = "a0000000-0000-4000-8000-000000000001";
+    const reader: BrainReader = {
+      getTodayCandidates: async () => [candidate],
+      searchContentBacklog: async () => [],
+      searchLibrary: async () => [],
+      getProductContext: async () => null,
+      getOpportunityContext: async () => null,
+      getRecentPosts: async () => [],
+      getRevivalEvents: async () => [],
+      createDevelopmentTestOpportunity: async () => {
+        calls++;
+        return "development-test-opportunity";
+      },
+    };
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const developmentClient = new Client({ name: "sfl-development-test-client", version: "1.0.0" });
+    const developmentServer = createSflMcpServer(reader, {
+      enableDevelopmentTestWrite: true,
+    });
+    await developmentServer.connect(serverTransport);
+    await developmentClient.connect(clientTransport);
+
+    try {
+      expect((await developmentClient.listTools()).tools.map((tool) => tool.name)).toContain(
+        "create_development_test_opportunity",
+      );
+      const first = await developmentClient.callTool({
+        name: "create_development_test_opportunity",
+        arguments: { request_id: requestId },
+      });
+      const retry = await developmentClient.callTool({
+        name: "create_development_test_opportunity",
+        arguments: { request_id: requestId },
+      });
+
+      expect(first.structuredContent).toEqual({
+        opportunity: expect.objectContaining({
+          id: "development-test-opportunity",
+        }),
+      });
+      expect(retry.structuredContent).toEqual(first.structuredContent);
+      expect(calls).toBe(2);
+      expect((await developmentClient.listTools()).tools.find(
+        (tool) => tool.name === "create_development_test_opportunity",
+      )?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      });
+    } finally {
+      await developmentClient.close();
+      await developmentServer.close();
+    }
   });
 });

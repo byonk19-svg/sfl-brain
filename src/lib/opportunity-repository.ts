@@ -287,6 +287,16 @@ export class OpportunityRepository {
     ) as unknown as string;
   }
 
+  async createDevelopmentTestOpportunity(requestId: string): Promise<string> {
+    return assertResult(
+      await this.client.rpc("create_development_test_content_opportunity", {
+        p_workspace_id: this.workspaceId,
+        p_request_id: requestId,
+      }),
+      "Create development test opportunity",
+    ) as unknown as string;
+  }
+
   async update(input: z.infer<typeof editOpportunitySchema>) {
     assertResult(
       await this.client
