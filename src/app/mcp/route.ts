@@ -61,7 +61,10 @@ async function requireHostedAuth(request: Request) {
 
 function createHostedHandler(member: ConnectorMember) {
   return createMcpHandler(
-    () => createSflMcpServer(createBrainService(member.workspaceId), {
+    () => createSflMcpServer(createBrainService(member.workspaceId, {
+      userId: member.userId,
+      source: "chatgpt_connector",
+    }), {
       enablePilotWrites: true,
     }),
     { legacy: "stateless" },

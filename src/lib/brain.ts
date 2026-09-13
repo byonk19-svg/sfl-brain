@@ -29,6 +29,11 @@ import { validateUpload } from "@/lib/validation";
 
 type JsonRecord = Record<string, unknown>;
 
+export type ConnectorMutationActor = {
+  userId: string;
+  source: "chatgpt_connector";
+};
+
 interface ProductGraphRow {
   id: string;
   name: string;
@@ -141,7 +146,20 @@ export class BrainService {
   constructor(
     private readonly client: SupabaseClient,
     private readonly workspaceId: string,
+    private readonly mutationActor?: ConnectorMutationActor,
   ) {}
+
+  private mcpMutationContext() {
+    return this.mutationActor
+      ? {
+          p_actor_user_id: this.mutationActor.userId,
+          p_source: this.mutationActor.source,
+        }
+      : {
+          p_actor_user_id: null,
+          p_source: "development_tunnel" as const,
+        };
+  }
 
   private opportunityRepository() {
     return new OpportunityRepository(this.client, this.workspaceId);
@@ -331,6 +349,7 @@ export class BrainService {
   async createPilotContentOpportunity(input: CreatePilotOpportunityInput) {
     return assertResult(await this.client.rpc("create_mcp_content_opportunity", {
       p_workspace_id: this.workspaceId, p_request_id: input.request_id, p_payload: input,
+      ...this.mcpMutationContext(),
     }), "Create conversational content opportunity") as JsonRecord;
   }
 
@@ -339,6 +358,7 @@ export class BrainService {
     return assertResult(await this.client.rpc("update_mcp_content_opportunity", {
       p_workspace_id: this.workspaceId, p_request_id: request_id, p_opportunity_id: opportunity_id,
       p_expected_updated_at: expected_updated_at, p_patch: patch, p_payload: input,
+      ...this.mcpMutationContext(),
     }), "Update conversational content opportunity") as JsonRecord;
   }
 
@@ -348,6 +368,7 @@ export class BrainService {
       p_destination_id: input.destination_id, p_published_at: new Date(input.published_at).toISOString(),
       p_asset_ids: input.asset_ids, p_caption: input.caption ?? null, p_angle: input.angle ?? null,
       p_performance_label: input.performance_label, p_payload: input,
+      ...this.mcpMutationContext(),
     }), "Record conversational post") as JsonRecord;
   }
 
@@ -575,10 +596,17 @@ export class BrainService {
   }
 }
 
-export function createBrainService(workspaceId?: string) {
+export function createBrainService(
+  workspaceId?: string,
+  mutationActor?: ConnectorMutationActor,
+) {
   const env = getServerEnv();
   const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  return new BrainService(client, workspaceId ?? env.SFL_WORKSPACE_ID);
+  return new BrainService(
+    client,
+    workspaceId ?? env.SFL_WORKSPACE_ID,
+    mutationActor,
+  );
 }
