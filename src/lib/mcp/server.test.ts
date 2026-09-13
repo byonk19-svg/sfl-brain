@@ -69,6 +69,48 @@ describe("SFL Brain MCP server", () => {
     }
   });
 
+  it("adds only the three approved conversational writes when enabled", async () => {
+    const reader: BrainReader = {
+      getTodayCandidates: async () => [],
+      searchContentBacklog: async () => [],
+      searchLibrary: async () => [],
+      getProductContext: async () => null,
+      getOpportunityContext: async () => null,
+      getRecentPosts: async () => [],
+      getRevivalEvents: async () => [],
+    };
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const hostedClient = new Client({ name: "hosted-sfl-client", version: "1.0.0" });
+    const hostedServer = createSflMcpServer(reader, { enablePilotWrites: true });
+    await hostedServer.connect(serverTransport);
+    await hostedClient.connect(clientTransport);
+
+    try {
+      const tools = (await hostedClient.listTools()).tools;
+      expect(tools.map((tool) => tool.name)).toEqual([
+        "get_today_candidates",
+        "get_available_destinations",
+        "create_content_opportunity",
+        "update_content_opportunity",
+        "record_post",
+        "search_sfl_library",
+        "get_product_context",
+        "get_content_opportunity_context",
+        "get_recent_posts",
+        "get_revival_events",
+      ]);
+      expect(tools.filter((tool) => tool.annotations?.readOnlyHint === false).map((tool) => tool.name)).toEqual([
+        "create_content_opportunity",
+        "update_content_opportunity",
+        "record_post",
+      ]);
+      expect(tools.map((tool) => tool.name)).not.toContain("create_development_test_opportunity");
+    } finally {
+      await hostedClient.close();
+      await hostedServer.close();
+    }
+  });
+
   it("validates tool input schemas", async () => {
     const result = await client.callTool({
       name: "get_today_candidates",

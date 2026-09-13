@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createConnectorTokenVerifier } from "@/lib/mcp/connector-auth";
+import {
+  createConnectorTokenVerifier,
+  resolveConnectorMember,
+} from "@/lib/mcp/connector-auth";
 
 const supabaseUrl = "https://project.supabase.co";
 
@@ -42,5 +45,35 @@ describe("hosted MCP token verification", () => {
     await expect(verifierForClaims(claims, error).verifyAccessToken("bad-token")).rejects.toMatchObject({
       code: "invalid_token",
     });
+  });
+});
+
+describe("hosted MCP workspace authorization", () => {
+  const authInfo = {
+    token: "token-a",
+    clientId: "chatgpt",
+    scopes: ["openid"],
+    expiresAt: 2_000_000_000,
+    extra: { userId: "user-a" },
+  };
+
+  it("resolves exactly one workspace through the authenticated token", async () => {
+    await expect(resolveConnectorMember(authInfo, {
+      findMemberships: vi.fn().mockResolvedValue([
+        { workspace_id: "workspace-a", user_id: "user-a" },
+      ]),
+    })).resolves.toMatchObject({
+      userId: "user-a",
+      workspaceId: "workspace-a",
+      authInfo: { extra: { userId: "user-a", workspaceId: "workspace-a" } },
+    });
+  });
+
+  it("denies a verified token without an authorized workspace", async () => {
+    const result = await resolveConnectorMember(authInfo, {
+      findMemberships: vi.fn().mockResolvedValue([]),
+    });
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(403);
   });
 });

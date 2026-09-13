@@ -1,11 +1,17 @@
 import "server-only";
 
 import {
+  type AuthInfo,
   OAuthError,
   OAuthErrorCode,
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
 import { createClient } from "@supabase/supabase-js";
+
+import {
+  WorkspaceAuthorizationError,
+  resolveSingleWorkspaceMembership,
+} from "@/lib/website-auth";
 
 type ConnectorClaims = {
   sub?: unknown;
@@ -88,4 +94,68 @@ export function createSupabaseConnectorTokenVerifier() {
     supabaseUrl,
     getClaims: (token) => auth.auth.getClaims(token),
   });
+}
+
+type WorkspaceMembership = { workspace_id: string; user_id: string };
+
+export type ConnectorMember = {
+  authInfo: AuthInfo;
+  userId: string;
+  workspaceId: string;
+};
+
+type ConnectorMemberDependencies = {
+  findMemberships: (
+    userId: string,
+    token: string,
+  ) => Promise<WorkspaceMembership[]>;
+};
+
+async function findMemberships(userId: string, token: string) {
+  const { supabaseUrl, publishableKey } = connectorAuthEnv();
+  const auth = createClient(supabaseUrl, publishableKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const result = await auth
+    .from("workspace_members")
+    .select("workspace_id,user_id")
+    .eq("user_id", userId)
+    .limit(2);
+  if (result.error) {
+    throw new WorkspaceAuthorizationError("Unable to verify workspace access.");
+  }
+  return result.data ?? [];
+}
+
+export async function resolveConnectorMember(
+  authInfo: AuthInfo,
+  dependencies: ConnectorMemberDependencies = { findMemberships },
+): Promise<ConnectorMember | Response> {
+  const userId = authInfo.extra?.userId;
+  if (typeof userId !== "string" || !userId) {
+    return Response.json({ error: "invalid_token" }, { status: 401 });
+  }
+
+  try {
+    const memberships = await dependencies.findMemberships(userId, authInfo.token);
+    const workspaceId = resolveSingleWorkspaceMembership(userId, memberships);
+    return {
+      userId,
+      workspaceId,
+      authInfo: {
+        ...authInfo,
+        extra: { ...authInfo.extra, userId, workspaceId },
+      },
+    };
+  } catch (error) {
+    if (error instanceof WorkspaceAuthorizationError) {
+      return Response.json({ error: "workspace_access_denied" }, { status: 403 });
+    }
+    throw error;
+  }
 }
