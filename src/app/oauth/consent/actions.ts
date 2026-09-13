@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { createAuthServerClient } from "@/lib/supabase/server";
-import { resolveWebsiteWorkspace } from "@/lib/website-auth";
+import { resolveWebsiteWorkspaceWithClient } from "@/lib/website-auth";
 
 type OAuthRedirectResult = {
   data: { redirect_url: string } | null;
@@ -42,15 +42,23 @@ export async function validateOAuthRedirect(value: string) {
   return url.toString();
 }
 
-async function realConsentDependencies(): Promise<ConsentDependencies> {
-  const auth = await createAuthServerClient();
+type ConsentAuthClient = Awaited<ReturnType<typeof createAuthServerClient>>;
+
+export async function createConsentDependencies(
+  auth: ConsentAuthClient,
+  resolveWorkspaceWithClient = resolveWebsiteWorkspaceWithClient,
+): Promise<ConsentDependencies> {
   return {
-    resolveWebsiteWorkspace,
+    resolveWebsiteWorkspace: () => resolveWorkspaceWithClient(auth),
     approveAuthorization: (authorizationId, options) =>
       auth.auth.oauth.approveAuthorization(authorizationId, options),
     denyAuthorization: (authorizationId, options) =>
       auth.auth.oauth.denyAuthorization(authorizationId, options),
   };
+}
+
+async function realConsentDependencies(): Promise<ConsentDependencies> {
+  return createConsentDependencies(await createAuthServerClient());
 }
 
 export async function decideOAuthConsent(

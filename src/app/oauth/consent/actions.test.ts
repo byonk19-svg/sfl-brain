@@ -4,6 +4,7 @@ import {
   WorkspaceAuthorizationError,
 } from "@/lib/website-auth";
 import {
+  createConsentDependencies,
   decideOAuthConsent,
   validateOAuthRedirect,
 } from "./actions";
@@ -23,6 +24,26 @@ function dependencies() {
 }
 
 describe("OAuth consent decisions", () => {
+  it("uses one auth client for membership and consent operations", async () => {
+    const auth = {
+      auth: {
+        oauth: {
+          approveAuthorization: vi.fn(),
+          denyAuthorization: vi.fn(),
+        },
+      },
+    };
+    const resolveWorkspaceWithClient = vi.fn().mockResolvedValue("workspace-a");
+    const deps = await createConsentDependencies(
+      auth as never,
+      resolveWorkspaceWithClient,
+    );
+
+    await deps.resolveWebsiteWorkspace();
+
+    expect(resolveWorkspaceWithClient).toHaveBeenCalledWith(auth);
+  });
+
   it("approves only after rechecking workspace membership", async () => {
     const deps = dependencies();
     await expect(decideOAuthConsent({

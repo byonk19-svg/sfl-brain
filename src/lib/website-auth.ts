@@ -33,8 +33,9 @@ export function resolveWorkspaceFromMembership(
   return resolveSingleWorkspaceMembership(userId, membership ? [membership] : []);
 }
 
-export async function resolveWebsiteWorkspace() {
-  const auth = await createAuthServerClient();
+export async function resolveWebsiteWorkspaceWithClient(
+  auth: Awaited<ReturnType<typeof createAuthServerClient>>,
+) {
   const { data, error } = await auth.auth.getClaims();
   if (error || !data?.claims?.sub) redirect("/login");
   const userId = data.claims.sub;
@@ -45,6 +46,10 @@ export async function resolveWebsiteWorkspace() {
     .limit(2);
   if (result.error) throw new WorkspaceAuthorizationError("Unable to verify workspace access.");
   return resolveSingleWorkspaceMembership(userId, result.data ?? []);
+}
+
+export async function resolveWebsiteWorkspace() {
+  return resolveWebsiteWorkspaceWithClient(await createAuthServerClient());
 }
 
 export async function createWebsiteBrainService() {
