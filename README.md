@@ -5,7 +5,7 @@ SFL Brain is the private content-memory and recommendation backend for the Style
 ChatGPT remains the conversational assistant. SFL Brain makes **no OpenAI API calls** and requires no OpenAI API key.
 
 > [!WARNING]
-> The website requires an authenticated Supabase account with an explicit `workspace_members` row. Its service-role credential remains server-only and is used only to access the authorized workspace after that check. `/mcp` is a separate, local-only service-role boundary; do not expose or deploy it until its own authentication slice is designed and implemented.
+> The website and production MCP connector require an authenticated Supabase account with exactly one explicit `workspace_members` row. The service-role credential remains server-only and is used only after that membership is verified. Hosted `/mcp` requests require Supabase OAuth 2.1 bearer authentication; the unauthenticated local endpoint remains a development-only tunnel target.
 
 ## Product model
 
@@ -34,9 +34,9 @@ Stages are Idea, Needs assets, Needs links, Needs caption, Ready, Posted, and Re
 - `/opportunities/[id]` — stage, next action, products, links, assets, destination history, and reversible archive state
 - `/products/[id]` — product/listing/link/asset/Radar facts plus related opportunities
 - `/record-post` — one publication to one destination, attached to one content opportunity
-- `/mcp` — stateless Streamable HTTP MCP endpoint with five read-only tools
+- `/mcp` — stateless Streamable HTTP MCP endpoint with seven reads and three confirmed, non-destructive writes when hosted
 
-Retailer scraping, stock monitoring, publishing integrations, AI tagging, OCR, notifications, public deployment, and write-capable MCP tools remain out of scope.
+Retailer scraping, stock monitoring, publishing integrations, AI tagging, OCR, notifications, destructive MCP actions, and full website write parity remain out of scope.
 
 ## Prerequisites
 
@@ -102,17 +102,23 @@ Posted content is excluded from ordinary Today results. It returns only when a R
 
 ## MCP tools
 
-The tool names remain stable and carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
+The seven read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
 
 - `get_today_candidates` — opportunity-centered recommendations
+- `get_available_destinations` — lists active destinations before recording a publication
 - `search_sfl_library` — searches opportunities and underlying products together
 - `get_product_context` — includes related content opportunities
+- `get_content_opportunity_context` — returns the complete sanitized opportunity context
 - `get_recent_posts` — includes and can filter by content opportunity
 - `get_revival_events` — includes affected opportunity relationships
 
 Every successful call returns readable text and `structuredContent`. Raw Storage paths and service credentials are removed from output.
 
-ChatGPT must reach an HTTPS MCP endpoint rather than `localhost`. During development, use OpenAI’s supported Secure MCP Tunnel flow and connect it in ChatGPT Developer Mode. Follow the current [OpenAI Developer mode and MCP apps documentation](https://help.openai.com/en/articles/12584461), not old tunnel tutorials.
+The hosted connector additionally exposes three non-destructive write tools: `create_content_opportunity`, `update_content_opportunity`, and `record_post`. ChatGPT presents these as writes and requires user confirmation. Each call is idempotent, checks current workspace membership, and records the authenticated actor plus `chatgpt_connector` source without storing conversation text.
+
+For production, connect ChatGPT directly to the deployed `https://YOUR_DOMAIN/mcp` endpoint using OAuth. In Supabase Authentication → OAuth Server, enable OAuth 2.1, set the authorization path to `/oauth/consent`, enable dynamic client registration, and retain disabled public signup. The production connector then works independently of this computer.
+
+During development, the existing Secure MCP Tunnel may continue to target `http://127.0.0.1:3000/mcp`. It is optional test infrastructure, not a production dependency. Follow the current [OpenAI Developer mode and MCP apps documentation](https://help.openai.com/en/articles/12584461).
 
 ## Verification
 
@@ -122,6 +128,8 @@ pnpm dlx supabase@2.116.0 db lint --local --level warning
 Get-Content -Raw supabase\tests\content_opportunities.sql | docker exec -i supabase_db_sfl-brain psql -U postgres -d postgres -v ON_ERROR_STOP=1
 pnpm mcp:smoke
 ```
+
+To smoke-test a deployed connector without printing its token, set `SFL_MCP_URL`, `SFL_MCP_MODE=hosted`, and `SFL_MCP_ACCESS_TOKEN` in the current process. To verify only the unauthenticated OAuth challenge, set `SFL_MCP_CHECK_UNAUTHENTICATED=1`; a healthy hosted endpoint returns `401` with a `resource_metadata` challenge.
 
 `pnpm verify` runs ESLint, TypeScript, Vitest, and the production build. Live integration tests run when `SFL_INTEGRATION=1` and the three server environment variables are present.
 

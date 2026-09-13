@@ -1,27 +1,29 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { validateToolContract } from "./mcp-smoke-contract.mjs";
 
 const endpoint = new URL(process.env.SFL_MCP_URL ?? "http://127.0.0.1:3000/mcp");
+const accessToken = process.env.SFL_MCP_ACCESS_TOKEN;
+const mode = process.env.SFL_MCP_MODE === "hosted" ? "hosted" : "local";
+
+if (process.env.SFL_MCP_CHECK_UNAUTHENTICATED === "1") {
+  const response = await fetch(endpoint);
+  const challenge = response.headers.get("www-authenticate") ?? "";
+  if (response.status !== 401 || !challenge.includes("resource_metadata=")) {
+    throw new Error("Hosted MCP did not return the expected OAuth challenge");
+  }
+  console.log("Hosted MCP authentication challenge: valid");
+  process.exit(0);
+}
+
 const client = new Client({ name: "sfl-brain-smoke", version: "0.1.0" });
 
 try {
-  await client.connect(new StreamableHTTPClientTransport(endpoint));
+  await client.connect(new StreamableHTTPClientTransport(endpoint, {
+    authProvider: accessToken ? { token: async () => accessToken } : undefined,
+  }));
   const listed = await client.listTools();
-  const expected = [
-    "get_today_candidates",
-    "get_available_destinations",
-    "search_sfl_library",
-    "get_product_context",
-    "get_content_opportunity_context",
-    "get_recent_posts",
-    "get_revival_events",
-  ];
   const names = listed.tools.map((tool) => tool.name);
-  if (JSON.stringify(names) !== JSON.stringify(expected)) {
-    throw new Error(`Unexpected MCP tools: ${names.join(", ")}`);
-  }
-  if (listed.tools.some((tool) => !tool.annotations?.readOnlyHint || tool.annotations?.openWorldHint !== false)) {
-    throw new Error("Every MCP tool must be read-only and closed-world");
-  }
+  validateToolContract(listed.tools, mode);
 
   const today = await client.callTool({ name: "get_today_candidates", arguments: { limit: 5 } });
   if (today.isError || !Array.isArray(today.structuredContent?.candidates)) {
