@@ -3,7 +3,7 @@ import Link from "next/link";
 import { recordPostAction } from "@/app/actions";
 import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import { humanize } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export default async function RecordPostPage({ searchParams }: { searchParams: S
   const selectedOpportunity = (Array.isArray(params.opportunity) ? params.opportunity[0] : params.opportunity) ?? "";
   const error = Array.isArray(params.error) ? params.error[0] : params.error;
   let options;
-  try { options = await createBrainService().getFormOptions(); }
+  try { options = await (await createWebsiteBrainService()).getFormOptions(); }
   catch (caught) { return <div className="page-shell narrow-shell"><Header /><SetupNotice message={caught instanceof Error ? caught.message : "Posting options could not load."} /></div>; }
 
   const selected = options.opportunities.find((opportunity) => opportunity.id === selectedOpportunity);

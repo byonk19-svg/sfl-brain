@@ -13,7 +13,7 @@ import {
 import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { CopyButton } from "@/components/copy-button";
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDateTime, formatMoney, humanize } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export default async function OpportunityPage({
   let opportunity: RecordValue | null;
   let options;
   try {
-    const brain = createBrainService();
+    const brain = await createWebsiteBrainService();
     [opportunity, options] = await Promise.all([
       brain.getOpportunityContext(id),
       brain.getFormOptions(),

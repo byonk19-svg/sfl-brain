@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { SetupNotice } from "@/components/notice";
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDate, formatMoney, humanize } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,10 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
   const params = await searchParams;
   const q = param(params.q);
   const view = param(params.view) === "products" ? "products" : "backlog";
+  const brain = await createWebsiteBrainService();
   let rows: Record<string, unknown>[] = [];
   let loadError: string | null = null;
   try {
-    const brain = createBrainService();
     rows = view === "backlog"
       ? await brain.searchContentBacklog(q, 100)
       : await brain.searchLibrary(q, 100);

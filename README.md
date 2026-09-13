@@ -5,7 +5,7 @@ SFL Brain is the private content-memory and recommendation backend for the Style
 ChatGPT remains the conversational assistant. SFL Brain makes **no OpenAI API calls** and requires no OpenAI API key.
 
 > [!WARNING]
-> This MVP uses a server-side Supabase service-role credential and has no end-user authentication or authorization. It is for private, local development only. Do not deploy it publicly until authentication and workspace authorization are added.
+> The website requires an authenticated Supabase account with an explicit `workspace_members` row. Its service-role credential remains server-only and is used only to access the authorized workspace after that check. `/mcp` is a separate, local-only service-role boundary; do not expose or deploy it until its own authentication slice is designed and implemented.
 
 ## Product model
 
@@ -59,9 +59,12 @@ Set these values in `.env.local` using the values from the local Supabase stack:
 SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_SERVICE_ROLE_KEY=your-local-service-role-key
 SFL_WORKSPACE_ID=11111111-1111-4111-8111-111111111111
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-local-publishable-key
+NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000
 ```
 
-Never give the service-role key a `NEXT_PUBLIC_` prefix, paste it into chat, or commit `.env.local`.
+Never give the service-role key a `NEXT_PUBLIC_` prefix, paste it into chat, or commit `.env.local`. Public sign-up is disabled in local configuration: create an approved account through the Supabase Auth admin path, then add its actual Auth user ID to `workspace_members`. See [private account provisioning](docs/private-account-provisioning.md).
 
 Apply both migrations and restore the Elaine-style seed:
 

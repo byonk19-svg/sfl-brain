@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import {
   affiliateLinkSchema,
   createOpportunitySchema,
@@ -49,7 +49,7 @@ export async function createProductAction(formData: FormData) {
       affiliate_network: formString(formData, "affiliate_network"),
       affiliate_url: formString(formData, "affiliate_url"),
     });
-    const id = await createBrainService().createProduct(input);
+    const id = await (await createWebsiteBrainService()).createProduct(input);
     revalidatePath("/today");
     revalidatePath("/library");
     destination = messageUrl(`/products/${id}`, "success", "Product added to the Brain.");
@@ -77,7 +77,7 @@ export async function createContentOpportunityAction(formData: FormData) {
       product_ids: formStrings(formData, "product_ids"),
       asset_ids: formStrings(formData, "asset_ids"),
     });
-    const id = await createBrainService().createContentOpportunity(input);
+    const id = await (await createWebsiteBrainService()).createContentOpportunity(input);
     revalidatePath("/today");
     revalidatePath("/library");
     destination = messageUrl(
@@ -108,7 +108,7 @@ export async function editContentOpportunityAction(formData: FormData) {
         "estimated_minutes_remaining",
       ),
     });
-    await createBrainService().updateContentOpportunity(input);
+    await (await createWebsiteBrainService()).updateContentOpportunity(input);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -128,7 +128,7 @@ export async function attachOpportunityProductAction(formData: FormData) {
       product_id: formString(formData, "product_id"),
       role: formString(formData, "role") || "supporting",
     });
-    await createBrainService().attachOpportunityProduct(input);
+    await (await createWebsiteBrainService()).attachOpportunityProduct(input);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -148,7 +148,7 @@ export async function detachOpportunityProductAction(formData: FormData) {
       product_id: formString(formData, "product_id"),
       role: "supporting",
     });
-    await createBrainService().detachOpportunityProduct(
+    await (await createWebsiteBrainService()).detachOpportunityProduct(
       input.opportunity_id,
       input.product_id,
     );
@@ -171,7 +171,7 @@ export async function attachOpportunityAssetAction(formData: FormData) {
       asset_id: formString(formData, "asset_id"),
       role: formString(formData, "role") || "supporting",
     });
-    await createBrainService().attachOpportunityAsset(input);
+    await (await createWebsiteBrainService()).attachOpportunityAsset(input);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -191,7 +191,7 @@ export async function detachOpportunityAssetAction(formData: FormData) {
       asset_id: formString(formData, "asset_id"),
       role: "supporting",
     });
-    await createBrainService().detachOpportunityAsset(
+    await (await createWebsiteBrainService()).detachOpportunityAsset(
       input.opportunity_id,
       input.asset_id,
     );
@@ -211,7 +211,7 @@ export async function setOpportunityArchivedAction(formData: FormData) {
   let destination = `/opportunities/${id}`;
   try {
     const validId = editOpportunitySchema.shape.id.parse(id);
-    await createBrainService().setContentOpportunityArchived(validId, archived);
+    await (await createWebsiteBrainService()).setContentOpportunityArchived(validId, archived);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -240,7 +240,7 @@ export async function editProductAction(formData: FormData) {
       tags: formString(formData, "tags"),
       notes: formString(formData, "notes"),
     });
-    await createBrainService().updateProduct(input);
+    await (await createWebsiteBrainService()).updateProduct(input);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -264,7 +264,7 @@ export async function addListingAction(formData: FormData) {
       stock_status: formString(formData, "stock_status"),
       is_primary: formData.get("is_primary") === "on",
     });
-    await createBrainService().addListing(input);
+    await (await createWebsiteBrainService()).addListing(input);
     revalidatePath("/today");
     revalidatePath("/library");
     revalidatePath(destination);
@@ -284,7 +284,7 @@ export async function addAffiliateLinkAction(formData: FormData) {
       network: formString(formData, "network"),
       url: formString(formData, "url"),
     });
-    await createBrainService().addAffiliateLink(input);
+    await (await createWebsiteBrainService()).addAffiliateLink(input);
     revalidatePath("/today");
     revalidatePath(destination);
     destination = messageUrl(destination, "success", "Affiliate link added.");
@@ -306,7 +306,7 @@ export async function addRadarEventAction(formData: FormData) {
       expires_at: formString(formData, "expires_at"),
       source: "manual",
     });
-    await createBrainService().addRadarEvent(input);
+    await (await createWebsiteBrainService()).addRadarEvent(input);
     revalidatePath("/today");
     revalidatePath(destination);
     destination = messageUrl(destination, "success", "Radar event added.");
@@ -322,7 +322,7 @@ export async function uploadAssetAction(formData: FormData) {
   try {
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("Choose a file to upload.");
-    await createBrainService().uploadAsset({
+    await (await createWebsiteBrainService()).uploadAsset({
       productId,
       title: formString(formData, "title"),
       source: formString(formData, "source") as "home" | "in_store" | "canva" | "web" | "other",
@@ -345,7 +345,7 @@ export async function uploadOpportunityAssetAction(formData: FormData) {
     const validId = editOpportunitySchema.shape.id.parse(opportunityId);
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("Choose a file to upload.");
-    await createBrainService().uploadAsset({
+    await (await createWebsiteBrainService()).uploadAsset({
       opportunityId: validId,
       title: formString(formData, "title"),
       source: formString(formData, "source") as "home" | "in_store" | "canva" | "web" | "other",
@@ -378,7 +378,7 @@ export async function recordPostAction(formData: FormData) {
       performance_label: formString(formData, "performance_label") || "unknown",
       notes: formString(formData, "notes"),
     });
-    await createBrainService().recordPost(input);
+    await (await createWebsiteBrainService()).recordPost(input);
     revalidatePath("/today");
     revalidatePath("/library");
     for (const id of input.product_ids) revalidatePath(`/products/${id}`);

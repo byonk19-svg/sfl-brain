@@ -575,10 +575,10 @@ export class BrainService {
   }
 }
 
-export function createBrainService() {
+export function createBrainService(workspaceId?: string) {
   const env = getServerEnv();
   const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  return new BrainService(client, env.SFL_WORKSPACE_ID);
+  return new BrainService(client, workspaceId ?? env.SFL_WORKSPACE_ID);
 }

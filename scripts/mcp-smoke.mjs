@@ -8,6 +8,7 @@ try {
   const listed = await client.listTools();
   const expected = [
     "get_today_candidates",
+    "get_available_destinations",
     "search_sfl_library",
     "get_product_context",
     "get_content_opportunity_context",

@@ -10,7 +10,7 @@ import {
 } from "@/app/actions";
 import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDateTime, formatMoney, humanize } from "@/lib/format";
 
 /* eslint-disable @next/next/no-img-element -- private signed Storage URLs are intentionally rendered without an external optimizer */
@@ -33,7 +33,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pa
   const { id } = await params;
   const query = await searchParams;
   let product: RecordValue | null;
-  try { product = await createBrainService().getProductContext(id); }
+  try { product = await (await createWebsiteBrainService()).getProductContext(id); }
   catch (error) { return <div className="page-shell"><SetupNotice message={error instanceof Error ? error.message : "Product context could not load."} /></div>; }
   if (!product) notFound();
 

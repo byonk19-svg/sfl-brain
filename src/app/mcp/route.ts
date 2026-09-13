@@ -17,14 +17,24 @@ const handler = createMcpHandler(
   },
 );
 
-export function POST(request: Request) {
+export function servesMcpHttp(environment?: { VERCEL?: string }) {
+  const runtimeEnvironment = process.env as Record<string, string | undefined>;
+  return (environment?.VERCEL ?? runtimeEnvironment.VERCEL) !== "1";
+}
+
+function fetchMcp(request: Request) {
+  if (!servesMcpHttp()) return new Response(null, { status: 404 });
   return handler.fetch(request);
+}
+
+export function POST(request: Request) {
+  return fetchMcp(request);
 }
 
 export function GET(request: Request) {
-  return handler.fetch(request);
+  return fetchMcp(request);
 }
 
 export function DELETE(request: Request) {
-  return handler.fetch(request);
+  return fetchMcp(request);
 }

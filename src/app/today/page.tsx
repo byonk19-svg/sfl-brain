@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { Notice, SetupNotice } from "@/components/notice";
-import { createBrainService } from "@/lib/brain";
+import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDate, humanize } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +27,12 @@ export default async function TodayPage({ searchParams }: { searchParams: Search
             ? { sort: "closest_to_done" as const }
             : filter === "revive"
               ? { candidate_type: "revival" as const }
-              : {};
+            : {};
 
+  const brain = await createWebsiteBrainService();
   let candidates;
   try {
-    candidates = await createBrainService().getTodayCandidates({
+    candidates = await brain.getTodayCandidates({
       ...filters,
       limit: 20,
     });
