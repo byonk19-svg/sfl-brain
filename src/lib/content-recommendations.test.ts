@@ -114,6 +114,23 @@ describe("content opportunity recommendation engine", () => {
     });
   });
 
+  it("excludes an on-hold opportunity from every Today mode", () => {
+    const held = opportunity({
+      opportunityId: "held",
+      currentHold: {
+        id: "hold-a",
+        holdReason: "Affiliate access unavailable",
+        releaseCondition: "Affiliate access becomes available",
+        reviewOn: null,
+        heldAt: NOW.toISOString(),
+        updatedAt: NOW.toISOString(),
+      },
+    } as unknown as Partial<ContentOpportunityInput>);
+
+    expect(getTodayContentCandidates([held], {}, NOW)).toEqual([]);
+    expect(getTodayContentCandidates([held], { sort: "closest_to_done" }, NOW)).toEqual([]);
+  });
+
   it("counts cross-posts of one opportunity once in recent content mix", () => {
     const comparison = publishedOpportunity("comparison", 1, 5);
     const styled = publishedOpportunity("styled_at_home", 2);

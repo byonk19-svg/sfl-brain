@@ -10,6 +10,7 @@ import {
   type ContentType,
   type MediaFormat,
   type OpportunityAssetInput,
+  type OpportunityHoldInput,
   type OpportunityProductInput,
   type OpportunityStatus,
 } from "@/lib/content-recommendations";
@@ -22,6 +23,36 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
+export type OpportunityAttentionScope = "active" | "on_hold" | "all";
+
+type AttentionScopedOpportunity = { currentHold?: unknown | null };
+
+export function filterOpportunitiesForScope<T extends AttentionScopedOpportunity>(
+  opportunities: T[],
+  scope: OpportunityAttentionScope,
+) {
+  if (scope === "all") return opportunities;
+  return opportunities.filter((opportunity) =>
+    scope === "on_hold" ? Boolean(opportunity.currentHold) : !opportunity.currentHold,
+  );
+}
+
+type HoldListRow = { id: string; review_on: string | null; held_at: string };
+
+export function sortOnHoldRows<T extends HoldListRow>(rows: T[], now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  return [...rows].sort((a, b) => {
+    const aDue = a.review_on !== null && a.review_on <= today;
+    const bDue = b.review_on !== null && b.review_on <= today;
+    if (aDue !== bDue) return aDue ? -1 : 1;
+    if (a.review_on !== null && b.review_on !== null) {
+      return a.review_on.localeCompare(b.review_on) || a.id.localeCompare(b.id);
+    }
+    if (a.review_on !== null || b.review_on !== null) return a.review_on !== null ? -1 : 1;
+    return b.held_at.localeCompare(a.held_at) || a.id.localeCompare(b.id);
+  });
+}
+
 interface OpportunityGraphRow {
   id: string;
   title: string;
@@ -32,6 +63,15 @@ interface OpportunityGraphRow {
   next_action: string | null;
   estimated_minutes_remaining: number | null;
   archived_at: string | null;
+  content_opportunity_holds?: Array<{
+    id: string;
+    hold_reason: string;
+    release_condition: string;
+    review_on: string | null;
+    held_at: string;
+    updated_at: string;
+    released_at: string | null;
+  }>;
   content_opportunity_products?: Array<{
     role: OpportunityProductInput["role"];
     products: {
@@ -89,6 +129,9 @@ function assertResult<T>(
 }
 
 function mapOpportunity(row: OpportunityGraphRow): ContentOpportunityInput {
+  const currentHold = (row.content_opportunity_holds ?? []).find(
+    (hold) => hold.released_at === null,
+  );
   return {
     opportunityId: row.id,
     title: row.title,
@@ -99,6 +142,14 @@ function mapOpportunity(row: OpportunityGraphRow): ContentOpportunityInput {
     nextAction: row.next_action,
     estimatedMinutesRemaining: row.estimated_minutes_remaining,
     archivedAt: row.archived_at,
+    currentHold: currentHold ? {
+      id: currentHold.id,
+      holdReason: currentHold.hold_reason,
+      releaseCondition: currentHold.release_condition,
+      reviewOn: currentHold.review_on,
+      heldAt: currentHold.held_at,
+      updatedAt: currentHold.updated_at,
+    } satisfies OpportunityHoldInput : null,
     products: (row.content_opportunity_products ?? []).flatMap((join) => {
       const product = join.products;
       if (!product) return [];
@@ -172,7 +223,7 @@ export class OpportunityRepository {
     const result = await this.client
       .from("content_opportunities")
       .select(
-        "id,title,status,content_type,media_format,notes,next_action,estimated_minutes_remaining,archived_at,content_opportunity_products(role,products(id,name,lifecycle_status,listings(id,retailer,current_price,currency,stock_status,is_primary,affiliate_links(id,network,url,is_active)),radar_events(id,event_type,happened_at,expires_at,dismissed_at))),content_opportunity_assets(role,assets(id,title,asset_type,post_assets(post_id))),posts(id,destination_id,published_at,performance_label,destinations(name))",
+        "id,title,status,content_type,media_format,notes,next_action,estimated_minutes_remaining,archived_at,content_opportunity_holds(id,hold_reason,release_condition,review_on,held_at,updated_at,released_at),content_opportunity_products(role,products(id,name,lifecycle_status,listings(id,retailer,current_price,currency,stock_status,is_primary,affiliate_links(id,network,url,is_active)),radar_events(id,event_type,happened_at,expires_at,dismissed_at))),content_opportunity_assets(role,assets(id,title,asset_type,post_assets(post_id))),posts(id,destination_id,published_at,performance_label,destinations(name))",
       )
       .eq("workspace_id", this.workspaceId);
     return (
@@ -184,10 +235,14 @@ export class OpportunityRepository {
     return buildRecentContentMix(await this.inputs(), limit);
   }
 
-  async search(query = "", limit = 100): Promise<JsonRecord[]> {
+  async search(
+    query = "",
+    limit = 100,
+    scope: OpportunityAttentionScope = "active",
+  ): Promise<JsonRecord[]> {
     const normalized = query.trim().toLowerCase();
     const now = new Date();
-    return (await this.inputs())
+    const rows = filterOpportunitiesForScope(await this.inputs(), scope)
       .filter((opportunity) => !opportunity.archivedAt)
       .map((opportunity) => {
         const scored = scoreContentOpportunity(opportunity, [], now);
@@ -196,6 +251,8 @@ export class OpportunityRepository {
           opportunity.notes,
           opportunity.nextAction,
           opportunity.contentType,
+          opportunity.currentHold?.holdReason,
+          opportunity.currentHold?.releaseCondition,
           ...opportunity.products.flatMap((product) => [
             product.name,
             ...product.listings.map((listing) => listing.retailer),
@@ -217,13 +274,23 @@ export class OpportunityRepository {
           active_links_count: scored.link_summary.active,
           last_published_at: scored.last_published_at,
           destination_count: scored.publication_summary.destination_count,
+          hold_reason: opportunity.currentHold?.holdReason ?? null,
+          release_condition: opportunity.currentHold?.releaseCondition ?? null,
+          review_on: opportunity.currentHold?.reviewOn ?? null,
+          held_at: opportunity.currentHold?.heldAt ?? null,
+          hold_updated_at: opportunity.currentHold?.updatedAt ?? null,
+          review_due: Boolean(
+            opportunity.currentHold?.reviewOn &&
+              opportunity.currentHold.reviewOn <= now.toISOString().slice(0, 10),
+          ),
           matches: !normalized || haystack.includes(normalized),
         };
       })
-      .filter((row) => row.matches)
-      .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
-      .slice(0, Math.min(Math.max(limit, 1), 100))
-      .map((row) => {
+      .filter((row) => row.matches);
+    const sorted = scope === "on_hold"
+      ? sortOnHoldRows(rows.map((row) => ({ ...row, held_at: row.held_at ?? "" })), now)
+      : rows.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    return sorted.slice(0, Math.min(Math.max(limit, 1), 100)).map((row) => {
         const output: Omit<typeof row, "matches"> & { matches?: boolean } = {
           ...row,
         };
@@ -236,7 +303,7 @@ export class OpportunityRepository {
     const result = await this.client
       .from("content_opportunities")
       .select(
-        "*,content_opportunity_products(role,products(*,listings(*,affiliate_links(*)),radar_events(*))),content_opportunity_assets(role,assets(*)),posts(*,destinations(*),post_metrics(*),post_assets(position,assets(id,title,asset_type)))",
+        "*,content_opportunity_holds(*),content_opportunity_products(role,products(*,listings(*,affiliate_links(*)),radar_events(*))),content_opportunity_assets(role,assets(*)),posts(*,destinations(*),post_metrics(*),post_assets(position,assets(id,title,asset_type)))",
       )
       .eq("workspace_id", this.workspaceId)
       .eq("id", opportunityId)

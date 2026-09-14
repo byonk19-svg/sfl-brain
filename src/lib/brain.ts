@@ -29,9 +29,9 @@ import { validateUpload } from "@/lib/validation";
 
 type JsonRecord = Record<string, unknown>;
 
-export type ConnectorMutationActor = {
+export type MutationActor = {
   userId: string;
-  source: "chatgpt_connector";
+  source: "website" | "chatgpt_connector";
 };
 
 interface ProductGraphRow {
@@ -146,7 +146,7 @@ export class BrainService {
   constructor(
     private readonly client: SupabaseClient,
     private readonly workspaceId: string,
-    private readonly mutationActor?: ConnectorMutationActor,
+    private readonly mutationActor?: MutationActor,
   ) {}
 
   private mcpMutationContext() {
@@ -194,8 +194,16 @@ export class BrainService {
     );
   }
 
-  async searchContentBacklog(query = "", limit = 100) {
-    return this.opportunityRepository().search(query, limit);
+  async searchContentBacklog(
+    query = "",
+    limit = 100,
+    scope: import("@/lib/opportunity-repository").OpportunityAttentionScope = "active",
+  ) {
+    return this.opportunityRepository().search(query, limit, scope);
+  }
+
+  async searchOnHoldOpportunities(query = "", limit = 100) {
+    return this.opportunityRepository().search(query, limit, "on_hold");
   }
 
   async getOpportunityContext(opportunityId: string) {
@@ -370,6 +378,68 @@ export class BrainService {
       p_performance_label: input.performance_label, p_payload: input,
       ...this.mcpMutationContext(),
     }), "Record conversational post") as JsonRecord;
+  }
+
+  private holdActor() {
+    if (!this.mutationActor) throw new Error("Hold mutation actor is required.");
+    return {
+      p_actor_user_id: this.mutationActor.userId,
+      p_source: this.mutationActor.source,
+    };
+  }
+
+  async placeContentOpportunityOnHold(input: {
+    opportunity_id: string;
+    request_id?: string | null;
+    hold_reason: string;
+    release_condition: string;
+    review_on?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("place_content_opportunity_on_hold", {
+      p_workspace_id: this.workspaceId,
+      p_opportunity_id: input.opportunity_id,
+      p_request_id: input.request_id ?? null,
+      p_hold_reason: input.hold_reason,
+      p_release_condition: input.release_condition,
+      p_review_on: input.review_on ?? null,
+      ...this.holdActor(),
+    }), "Place content opportunity on hold") as JsonRecord;
+  }
+
+  async updateContentOpportunityHold(input: {
+    hold_id: string;
+    request_id?: string | null;
+    expected_updated_at: string;
+    hold_reason: string;
+    release_condition: string;
+    review_on?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("update_content_opportunity_hold", {
+      p_workspace_id: this.workspaceId,
+      p_hold_id: input.hold_id,
+      p_request_id: input.request_id ?? null,
+      p_expected_updated_at: input.expected_updated_at,
+      p_hold_reason: input.hold_reason,
+      p_release_condition: input.release_condition,
+      p_review_on: input.review_on ?? null,
+      ...this.holdActor(),
+    }), "Update content opportunity hold") as JsonRecord;
+  }
+
+  async releaseContentOpportunityHold(input: {
+    hold_id: string;
+    request_id?: string | null;
+    expected_updated_at: string;
+    release_note?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("release_content_opportunity_hold", {
+      p_workspace_id: this.workspaceId,
+      p_hold_id: input.hold_id,
+      p_request_id: input.request_id ?? null,
+      p_expected_updated_at: input.expected_updated_at,
+      p_release_note: input.release_note ?? null,
+      ...this.holdActor(),
+    }), "Release content opportunity hold") as JsonRecord;
   }
 
   async createContentOpportunity(
@@ -598,7 +668,7 @@ export class BrainService {
 
 export function createBrainService(
   workspaceId?: string,
-  mutationActor?: ConnectorMutationActor,
+  mutationActor?: MutationActor,
 ) {
   const env = getServerEnv();
   const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {

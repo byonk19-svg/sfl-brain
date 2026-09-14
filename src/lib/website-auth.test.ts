@@ -25,7 +25,8 @@ import {
   resolveSingleWorkspaceMembership,
   resolveWorkspaceFromMembership,
 } from "@/lib/website-auth";
-import { resolveWebsiteWorkspace } from "@/lib/website-auth";
+import { createWebsiteBrainService, resolveWebsiteWorkspace } from "@/lib/website-auth";
+import { createBrainService } from "@/lib/brain";
 
 describe("website workspace authorization", () => {
   it("denies an unauthenticated identity", () => {
@@ -64,5 +65,13 @@ describe("website workspace authorization", () => {
     expect(authClient.from).toHaveBeenCalledWith("workspace_members");
     expect(eqUserId).toHaveBeenCalledWith("user_id", "user-a");
     expect(limit).toHaveBeenCalledWith(2);
+  });
+
+  it("preserves the authenticated website actor in BrainService", async () => {
+    await createWebsiteBrainService();
+    expect(createBrainService).toHaveBeenCalledWith("workspace-a", {
+      userId: "user-a",
+      source: "website",
+    });
   });
 });

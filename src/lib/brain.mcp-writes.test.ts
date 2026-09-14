@@ -61,4 +61,46 @@ describe("audited conversational writes", () => {
       p_source: "chatgpt_connector",
     }));
   });
+
+  it("passes request and actor context to hold placement", async () => {
+    const { brain, rpc } = service();
+    await brain.placeContentOpportunityOnHold({
+      opportunity_id: opportunityId,
+      request_id: requestId,
+      hold_reason: "Affiliate access unavailable",
+      release_condition: "Affiliate access becomes available",
+      review_on: null,
+    });
+    expect(rpc).toHaveBeenCalledWith("place_content_opportunity_on_hold", expect.objectContaining({
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+      p_request_id: requestId,
+    }));
+  });
+
+  it("passes optimistic concurrency to hold updates and releases", async () => {
+    const { brain, rpc } = service();
+    await brain.updateContentOpportunityHold({
+      hold_id: "a0000000-0000-4000-8000-000000000004",
+      request_id: requestId,
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+      hold_reason: "Updated reason",
+      release_condition: "Updated condition",
+      review_on: "2026-10-01",
+    });
+    await brain.releaseContentOpportunityHold({
+      hold_id: "a0000000-0000-4000-8000-000000000004",
+      request_id: requestId,
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+      release_note: "Condition met",
+    });
+    expect(rpc).toHaveBeenNthCalledWith(1, "update_content_opportunity_hold", expect.objectContaining({
+      p_expected_updated_at: "2026-09-13T12:00:00.000Z",
+      p_source: "chatgpt_connector",
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(2, "release_content_opportunity_hold", expect.objectContaining({
+      p_expected_updated_at: "2026-09-13T12:00:00.000Z",
+      p_source: "chatgpt_connector",
+    }));
+  });
 });

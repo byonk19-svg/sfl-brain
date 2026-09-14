@@ -65,6 +65,15 @@ export interface OpportunityPostInput {
   performanceLabel: PerformanceLabel;
 }
 
+export interface OpportunityHoldInput {
+  id: string;
+  holdReason: string;
+  releaseCondition: string;
+  reviewOn: string | null;
+  heldAt: string;
+  updatedAt: string;
+}
+
 export interface ContentOpportunityInput {
   opportunityId: string;
   title: string;
@@ -75,6 +84,7 @@ export interface ContentOpportunityInput {
   nextAction: string | null;
   estimatedMinutesRemaining: number | null;
   archivedAt: string | null;
+  currentHold?: OpportunityHoldInput | null;
   products: OpportunityProductInput[];
   assets: OpportunityAssetInput[];
   posts: OpportunityPostInput[];
@@ -463,7 +473,7 @@ export function getTodayContentCandidates(
   const recentMix = getRecentContentMix(opportunities, 5);
   const limit = Math.min(Math.max(Math.trunc(filters.limit ?? 20), 1), 100);
   const candidates = opportunities
-    .filter((opportunity) => !opportunity.archivedAt)
+    .filter((opportunity) => !opportunity.archivedAt && !opportunity.currentHold)
     .map((opportunity) => ({
       input: opportunity,
       candidate: scoreContentOpportunity(opportunity, recentMix, now),
