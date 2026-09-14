@@ -274,6 +274,7 @@ export class OpportunityRepository {
           active_links_count: scored.link_summary.active,
           last_published_at: scored.last_published_at,
           destination_count: scored.publication_summary.destination_count,
+          hold_id: opportunity.currentHold?.id ?? null,
           hold_reason: opportunity.currentHold?.holdReason ?? null,
           release_condition: opportunity.currentHold?.releaseCondition ?? null,
           review_on: opportunity.currentHold?.reviewOn ?? null,
