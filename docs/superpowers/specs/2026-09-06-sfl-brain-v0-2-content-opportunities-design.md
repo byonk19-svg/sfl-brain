@@ -12,7 +12,7 @@ The chosen architecture is additive and normalized. Replacing products would dis
 
 - UUID, workspace, title, notes, and next action
 - stage: `idea`, `needs_assets`, `needs_links`, `needs_caption`, `ready`, `posted`, or `revival_candidate`
-- content type: comparison, in-store find, styled-at-home, sale/restock, collection/roundup, standalone product, lifestyle/shop-the-look, recommendation/response, or reel/video
+- content type: comparison, in-store find, styled-at-home, sale/restock, collection/roundup, standalone product, lifestyle/shop-the-look, recommendation/response, or unspecified. A later product-fit correction established that reel/video is a media format, not an editorial content type; migration `20260907222100_content_opportunity_type_unspecified.sql` preserves that distinction.
 - optional media format
 - optional explicit minutes remaining
 - created/updated timestamps and optional `archived_at`
@@ -27,7 +27,7 @@ The pure TypeScript engine ranks opportunities. It keeps v0.1 product facts—av
 
 Default stage effort is 5 minutes for ready, 10 for needs-caption or revival, 15 for needs-links, and 30 for needs-assets or idea. An explicit estimate overrides the default. Ready and needs-caption receive the largest readiness bonuses. Posted opportunities are excluded unless they have a revival signal. An opportunity whose attached products are all unavailable or inactive is suppressed; opportunities with no product are valid backlog entries.
 
-Variety looks at the five most recently published distinct opportunities, using the latest destination publication for each opportunity. Multiple cross-post rows therefore count once. A candidate receives no variety penalty for zero or one recent occurrence of its content type, then a soft eight-point penalty per additional occurrence, capped at 24 points. Strong restock, sale, performance, or readiness signals can outweigh it. Every factor emits a matching reason and scores remain deterministic with stable tie-breaking.
+Variety looks at the five most recently introduced distinct opportunities, using the first destination publication for each opportunity. A later cross-post remains part of the same editorial event and does not make that content idea newly recent. A candidate receives no variety penalty for zero or one recent occurrence of its content type, then escalating soft penalties for immediate and repeated similarity. Strong restock, sale, performance, or readiness signals can outweigh them. Every factor emits a matching reason and scores remain deterministic with stable tie-breaking.
 
 Filters are Best Next Post, 5 minutes, 15 minutes, Closest to Done, No New Pictures, and Revive Something. Closest to Done sorts by effort before score; Revive filters to revival candidates.
 

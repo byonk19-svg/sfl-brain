@@ -14,6 +14,7 @@ import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { CopyButton } from "@/components/copy-button";
 import { OpportunityHoldForm } from "@/components/opportunity-hold-form";
+import { OpportunityHoldSummary } from "@/components/opportunity-hold-summary";
 import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDateTime, formatMoney, humanize } from "@/lib/format";
 
@@ -87,7 +88,7 @@ export default async function OpportunityPage({
 
       <section className={`detail-section hold-panel${currentHold ? " is-held" : ""}`}>
         <div className="section-heading"><span>H</span><h2>{currentHold ? "On hold" : "Attention status"}</h2></div>
-        {currentHold ? <><p><strong>Why:</strong> {text(currentHold.hold_reason)}</p><p><strong>Release when:</strong> {text(currentHold.release_condition)}</p><p><strong>Review:</strong> {currentHold.review_on ? formatDateTime(`${text(currentHold.review_on)}T12:00:00Z`) : "No review date"}</p><OpportunityHoldForm opportunityId={id} currentHold={{ id: text(currentHold.id), hold_reason: text(currentHold.hold_reason), release_condition: text(currentHold.release_condition), review_on: text(currentHold.review_on) || null, updated_at: text(currentHold.updated_at) }} /></> : <><p>This opportunity is active and can appear in the backlog and Today recommendations.</p><OpportunityHoldForm opportunityId={id} /></>}
+        {currentHold ? <><OpportunityHoldSummary holdReason={text(currentHold.hold_reason)} releaseCondition={text(currentHold.release_condition)} reviewOn={text(currentHold.review_on) || null} heldAt={text(currentHold.held_at)} heldSource={text(currentHold.held_source)} /><OpportunityHoldForm opportunityId={id} currentHold={{ id: text(currentHold.id), hold_reason: text(currentHold.hold_reason), release_condition: text(currentHold.release_condition), review_on: text(currentHold.review_on) || null, updated_at: text(currentHold.updated_at) }} /></> : <><p>This opportunity is active and can appear in the backlog and Today recommendations.</p><OpportunityHoldForm opportunityId={id} /></>}
         {holds.some((hold) => hold.released_at) && <details className="hold-history"><summary>Previous holds</summary>{holds.filter((hold) => hold.released_at).map((hold) => <article key={text(hold.id)}><strong>{text(hold.hold_reason)}</strong><p>{text(hold.release_condition)}</p><small>Released {formatDateTime(text(hold.released_at))}</small></article>)}</details>}
       </section>
 

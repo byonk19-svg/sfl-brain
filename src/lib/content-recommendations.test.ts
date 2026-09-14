@@ -131,6 +131,35 @@ describe("content opportunity recommendation engine", () => {
     expect(getTodayContentCandidates([held], { sort: "closest_to_done" }, NOW)).toEqual([]);
   });
 
+  it("does not let a held publication affect active editorial variety", () => {
+    const heldPublication = publishedOpportunity("comparison", 1);
+    heldPublication.currentHold = {
+      id: "hold-a",
+      holdReason: "Affiliate access unavailable",
+      releaseCondition: "Affiliate access becomes available",
+      reviewOn: null,
+      heldAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    };
+    const active = opportunity({
+      opportunityId: "active-comparison",
+      contentType: "comparison",
+    });
+
+    const [candidate] = getTodayContentCandidates(
+      [heldPublication, active],
+      {},
+      NOW,
+    );
+
+    expect(candidate?.opportunity_id).toBe("active-comparison");
+    expect(candidate?.reasons).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: expect.stringMatching(/^variety_/) }),
+      ]),
+    );
+  });
+
   it("counts cross-posts of one opportunity once in recent content mix", () => {
     const comparison = publishedOpportunity("comparison", 1, 5);
     const styled = publishedOpportunity("styled_at_home", 2);

@@ -470,10 +470,12 @@ export function getTodayContentCandidates(
   filters: TodayContentFilters = {},
   now = new Date(),
 ) {
-  const recentMix = getRecentContentMix(opportunities, 5);
+  const attentionEligible = opportunities.filter(
+    (opportunity) => !opportunity.archivedAt && !opportunity.currentHold,
+  );
+  const recentMix = getRecentContentMix(attentionEligible, 5);
   const limit = Math.min(Math.max(Math.trunc(filters.limit ?? 20), 1), 100);
-  const candidates = opportunities
-    .filter((opportunity) => !opportunity.archivedAt && !opportunity.currentHold)
+  const candidates = attentionEligible
     .map((opportunity) => ({
       input: opportunity,
       candidate: scoreContentOpportunity(opportunity, recentMix, now),

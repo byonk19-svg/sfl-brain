@@ -52,9 +52,9 @@ No credentials, tokens, or private member identifiers belong in this handoff.
 
 ## Verification evidence
 
-The final pre-PR verification produced:
+The post-review local verification produced:
 
-- Vitest: 97 passed, 8 skipped across 21 test files.
+- Vitest: 105 passed, 8 skipped across 24 test files.
 - ESLint: zero errors and one existing `@next/next/no-img-element` warning in the opportunity detail page.
 - TypeScript: passed.
 - Next.js production build: passed and generated all expected routes.
@@ -63,6 +63,8 @@ The final pre-PR verification produced:
 - `git diff --check`: passed.
 - Signed-in production browser acceptance confirmed Backlog exclusion, On hold display, Today exclusion, and held-result discovery from Backlog search.
 - ChatGPT plugin management showed the refreshed hold action inventory.
+
+The pull-request review found and locally corrected two behavior gaps: held publications could affect active variety scoring, and the narrow On hold layout hid its reason and release condition. It also added the required held date/source treatment and an explicit due-review badge. A signed-in narrow production check confirmed the navigation and native keyboard access to Edit hold, but the responsive display correction and provenance treatment require the next production deployment before they can be visually accepted against the hosted build.
 
 Re-run the canonical gate when code changes:
 
@@ -80,6 +82,8 @@ pnpm mcp:smoke
 - Separate notification of manual release is intentionally absent; the acting surface provides immediate confirmation.
 - The Post Package archive described in the product vision is not yet implemented as a complete asset-and-caption workflow.
 - Feature plans retain unchecked boxes from their original authoring and are not current completion trackers.
+- The reviewed responsive and provenance corrections are in pull request #1 but are not part of the last verified production deployment.
+- A complete disposable website edit/release cycle and confirmed ChatGPT hold-mutation cycle were not rerun: local Docker was unavailable, and the review did not mutate Elaine's production content.
 
 ## Guardrails
 
