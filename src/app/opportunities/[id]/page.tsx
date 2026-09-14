@@ -13,6 +13,7 @@ import {
 import { Notice, SetupNotice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { CopyButton } from "@/components/copy-button";
+import { OpportunityHoldForm } from "@/components/opportunity-hold-form";
 import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDateTime, formatMoney, humanize } from "@/lib/format";
 
@@ -60,6 +61,10 @@ export default async function OpportunityPage({
   const posts = records(opportunity.posts).sort((a, b) =>
     text(b.published_at).localeCompare(text(a.published_at)),
   );
+  const holds = records(opportunity.content_opportunity_holds).sort((a, b) =>
+    text(b.held_at).localeCompare(text(a.held_at)),
+  );
+  const currentHold = holds.find((hold) => !hold.released_at);
   const attachedProductIds = new Set(productJoins.map((join) => text(record(join.products).id)));
   const attachedAssetIds = new Set(assetJoins.map((join) => text(record(join.assets).id)));
   const availableProducts = options.products.filter((item) => !attachedProductIds.has(item.id));
@@ -79,6 +84,12 @@ export default async function OpportunityPage({
         <div className="header-actions"><Link className="button" href={`/record-post?opportunity=${id}`}>Record post</Link><a className="button button-quiet" href="#edit-opportunity">Edit</a><form action={setOpportunityArchivedAction}><input type="hidden" name="opportunity_id" value={id} /><input type="hidden" name="archived" value={opportunity.archived_at ? "false" : "true"} /><button className="text-button header-text-button" type="submit">{opportunity.archived_at ? "Restore" : "Archive"}</button></form></div>
       </header>
       <Notice success={success} error={error} />
+
+      <section className={`detail-section hold-panel${currentHold ? " is-held" : ""}`}>
+        <div className="section-heading"><span>H</span><h2>{currentHold ? "On hold" : "Attention status"}</h2></div>
+        {currentHold ? <><p><strong>Why:</strong> {text(currentHold.hold_reason)}</p><p><strong>Release when:</strong> {text(currentHold.release_condition)}</p><p><strong>Review:</strong> {currentHold.review_on ? formatDateTime(`${text(currentHold.review_on)}T12:00:00Z`) : "No review date"}</p><OpportunityHoldForm opportunityId={id} currentHold={{ id: text(currentHold.id), hold_reason: text(currentHold.hold_reason), release_condition: text(currentHold.release_condition), review_on: text(currentHold.review_on) || null, updated_at: text(currentHold.updated_at) }} /></> : <><p>This opportunity is active and can appear in the backlog and Today recommendations.</p><OpportunityHoldForm opportunityId={id} /></>}
+        {holds.some((hold) => hold.released_at) && <details className="hold-history"><summary>Previous holds</summary>{holds.filter((hold) => hold.released_at).map((hold) => <article key={text(hold.id)}><strong>{text(hold.hold_reason)}</strong><p>{text(hold.release_condition)}</p><small>Released {formatDateTime(text(hold.released_at))}</small></article>)}</details>}
+      </section>
 
       <div className="opportunity-summary">
         <div><small>Stage</small><strong>{humanize(text(opportunity.status))}</strong></div>

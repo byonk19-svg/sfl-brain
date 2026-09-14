@@ -15,8 +15,11 @@ import {
   listingSchema,
   opportunityAssetSchema,
   opportunityProductSchema,
+  placeOpportunityHoldSchema,
   radarEventSchema,
   recordPostSchema,
+  releaseOpportunityHoldSchema,
+  updateOpportunityHoldSchema,
 } from "@/lib/validation";
 
 function errorMessage(error: unknown) {
@@ -220,6 +223,68 @@ export async function setOpportunityArchivedAction(formData: FormData) {
       "success",
       archived ? "Content archived. You can restore it here." : "Content restored to the backlog.",
     );
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function placeOpportunityOnHoldAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = placeOpportunityHoldSchema.parse({
+      opportunity_id: opportunityId,
+      hold_reason: formString(formData, "hold_reason"),
+      release_condition: formString(formData, "release_condition"),
+      review_on: formString(formData, "review_on"),
+    });
+    await (await createWebsiteBrainService()).placeContentOpportunityOnHold(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Moved to On hold.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function updateOpportunityHoldAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = updateOpportunityHoldSchema.parse({
+      hold_id: formString(formData, "hold_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      hold_reason: formString(formData, "hold_reason"),
+      release_condition: formString(formData, "release_condition"),
+      review_on: formString(formData, "review_on"),
+    });
+    await (await createWebsiteBrainService()).updateContentOpportunityHold(input);
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Hold details updated.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function releaseOpportunityHoldAction(formData: FormData) {
+  const opportunityId = formString(formData, "opportunity_id");
+  let destination = `/opportunities/${opportunityId}`;
+  try {
+    const input = releaseOpportunityHoldSchema.parse({
+      hold_id: formString(formData, "hold_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      release_note: formString(formData, "release_note"),
+    });
+    await (await createWebsiteBrainService()).releaseContentOpportunityHold(input);
+    revalidatePath("/today");
+    revalidatePath("/library");
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Returned to the active backlog.");
   } catch (error) {
     destination = messageUrl(destination, "error", errorMessage(error));
   }

@@ -4,6 +4,9 @@ import {
   createOpportunitySchema,
   createProductSchema,
   editOpportunitySchema,
+  placeOpportunityHoldSchema,
+  releaseOpportunityHoldSchema,
+  updateOpportunityHoldSchema,
   recordPostSchema,
   validateUpload,
 } from "@/lib/validation";
@@ -118,6 +121,33 @@ describe("form validation", () => {
         published_at: "2026-09-06T09:00",
       }),
     ).toThrow(/opportunity/i);
+  });
+
+  it("requires a hold reason and release condition with an optional date", () => {
+    expect(placeOpportunityHoldSchema.parse({
+      opportunity_id: "90000000-0000-4000-8000-000000000001",
+      hold_reason: "Affiliate access unavailable",
+      release_condition: "Affiliate access becomes available",
+      review_on: "2026-10-01",
+    })).toMatchObject({ review_on: "2026-10-01" });
+    expect(() => placeOpportunityHoldSchema.parse({
+      opportunity_id: "90000000-0000-4000-8000-000000000001",
+      hold_reason: "",
+      release_condition: "",
+    })).toThrow();
+  });
+
+  it("requires optimistic concurrency for hold edits and releases", () => {
+    const common = {
+      hold_id: "90000000-0000-4000-8000-000000000001",
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+    };
+    expect(updateOpportunityHoldSchema.parse({
+      ...common,
+      hold_reason: "Reason",
+      release_condition: "Condition",
+    })).toMatchObject(common);
+    expect(releaseOpportunityHoldSchema.parse(common)).toMatchObject(common);
   });
 });
 

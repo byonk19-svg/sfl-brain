@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { createPilotOpportunitySchema, recordPilotPostSchema, updatePilotOpportunitySchema, type CreatePilotOpportunityInput, type RecordPilotPostInput, type UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
+import { placeHoldSchema, releaseHoldSchema, updateHoldSchema, type PlaceHoldInput, type ReleaseHoldInput, type UpdateHoldInput } from "@/lib/mcp/hold-schemas";
 
 import type {
   TodayContentCandidate,
@@ -11,7 +12,8 @@ type JsonRecord = Record<string, unknown>;
 
 export interface BrainReader {
   getTodayCandidates(filters: TodayContentFilters): Promise<TodayContentCandidate[]>;
-  searchContentBacklog(query: string, limit: number): Promise<JsonRecord[]>;
+  searchContentBacklog(query: string, limit: number, scope?: "active" | "on_hold" | "all"): Promise<JsonRecord[]>;
+  searchOnHoldOpportunities?(query: string, limit: number): Promise<JsonRecord[]>;
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
   getOpportunityContext(opportunityId: string): Promise<JsonRecord | null>;
@@ -20,6 +22,9 @@ export interface BrainReader {
   createPilotContentOpportunity?(input: CreatePilotOpportunityInput): Promise<JsonRecord>;
   updatePilotContentOpportunity?(input: UpdatePilotOpportunityInput): Promise<JsonRecord>;
   recordPilotPost?(input: RecordPilotPostInput): Promise<JsonRecord>;
+  placeContentOpportunityOnHold?(input: PlaceHoldInput): Promise<JsonRecord>;
+  updateContentOpportunityHold?(input: UpdateHoldInput): Promise<JsonRecord>;
+  releaseContentOpportunityHold?(input: ReleaseHoldInput): Promise<JsonRecord>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
@@ -147,6 +152,10 @@ export function createSflMcpServer(
     title: "Get Available Destinations", description: "Read active posting destinations before recording an actual publication.", inputSchema: z.object({}), annotations: readOnlyAnnotations,
   }, async () => { try { return success("destinations", await reader.getAvailableDestinations?.() ?? [], "Active posting destinations."); } catch (error) { return failure(error); } });
 
+  server.registerTool("get_on_hold_opportunities", { title: "Get On-Hold Opportunities", description: "List retained opportunities that are excluded from active work, ordered for manual review.", inputSchema: z.object({ query: z.string().trim().max(200).default(""), limit: z.number().int().min(1).max(100).default(20) }), annotations: readOnlyAnnotations }, async ({ query, limit }) => {
+    try { return success("opportunities", await reader.searchOnHoldOpportunities?.(query, limit) ?? [], "On-hold content opportunities."); } catch (error) { return failure(error); }
+  });
+
   if (options.enablePilotWrites) {
     const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
     server.registerTool("create_content_opportunity", { title: "Save Content Idea", description: "Save a real content idea. Use only when the user asks to save it; products, links, and assets are optional.", inputSchema: createPilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
@@ -158,6 +167,9 @@ export function createSflMcpServer(
     server.registerTool("record_post", { title: "Record Actual Publication", description: "Record one publication that already happened to one verified destination. This never publishes externally.", inputSchema: recordPilotPostSchema, annotations: developmentWriteAnnotations }, async (args) => {
       try { if (!reader.recordPilotPost) return unavailable("Record post"); return success("publication", await reader.recordPilotPost(args), "Actual publication recorded."); } catch (error) { return failure(error); }
     });
+    server.registerTool("place_content_opportunity_on_hold", { title: "Put Content On Hold", description: "Put a verified opportunity on hold only after the user confirms the reason and release condition.", inputSchema: placeHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.placeContentOpportunityOnHold) return unavailable("Place hold"); const hold = await reader.placeContentOpportunityOnHold(args); return success("hold", hold, "Content opportunity moved to On hold."); } catch (error) { return failure(error); } });
+    server.registerTool("update_content_opportunity_hold", { title: "Update Content Hold", description: "Update the current hold after an explicit user request and fresh read.", inputSchema: updateHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.updateContentOpportunityHold) return unavailable("Update hold"); return success("hold", await reader.updateContentOpportunityHold(args), "Hold details updated."); } catch (error) { return failure(error); } });
+    server.registerTool("release_content_opportunity_hold", { title: "Return Content To Backlog", description: "Manually release the current hold only after the user confirms.", inputSchema: releaseHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.releaseContentOpportunityHold) return unavailable("Release hold"); return success("hold", await reader.releaseContentOpportunityHold(args), "Content opportunity returned to the active backlog."); } catch (error) { return failure(error); } });
   }
 
   server.registerTool(
@@ -175,7 +187,7 @@ export function createSflMcpServer(
     async ({ query, limit }) => {
       try {
         const [opportunities, products] = await Promise.all([
-          reader.searchContentBacklog(query, limit),
+          reader.searchContentBacklog(query, limit, "all"),
           reader.searchLibrary(query, limit),
         ]);
         const safeResults = sanitize({ opportunities, products }) as {

@@ -34,7 +34,7 @@ Stages are Idea, Needs assets, Needs links, Needs caption, Ready, Posted, and Re
 - `/opportunities/[id]` — stage, next action, products, links, assets, destination history, and reversible archive state
 - `/products/[id]` — product/listing/link/asset/Radar facts plus related opportunities
 - `/record-post` — one publication to one destination, attached to one content opportunity
-- `/mcp` — stateless Streamable HTTP MCP endpoint with seven reads and three confirmed, non-destructive writes when hosted
+- `/mcp` — stateless Streamable HTTP MCP endpoint with eight reads and six confirmed, non-destructive writes when hosted
 
 Retailer scraping, stock monitoring, publishing integrations, AI tagging, OCR, notifications, destructive MCP actions, and full website write parity remain out of scope.
 
@@ -106,6 +106,7 @@ The seven read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idem
 
 - `get_today_candidates` — opportunity-centered recommendations
 - `get_available_destinations` — lists active destinations before recording a publication
+- `get_on_hold_opportunities` — lists retained ideas in manual review order
 - `search_sfl_library` — searches opportunities and underlying products together
 - `get_product_context` — includes related content opportunities
 - `get_content_opportunity_context` — returns the complete sanitized opportunity context
@@ -115,6 +116,8 @@ The seven read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idem
 Every successful call returns readable text and `structuredContent`. Raw Storage paths and service credentials are removed from output.
 
 The hosted connector additionally exposes three non-destructive write tools: `create_content_opportunity`, `update_content_opportunity`, and `record_post`. ChatGPT presents these as writes and requires user confirmation. Each call is idempotent, checks current workspace membership, and records the authenticated actor plus `chatgpt_connector` source without storing conversation text.
+
+It also exposes confirmed hold management: `place_content_opportunity_on_hold`, `update_content_opportunity_hold`, and `release_content_opportunity_hold`. Holds remain manual; the connector does not monitor release conditions or send automatic notifications.
 
 For production, connect ChatGPT directly to the deployed `https://YOUR_DOMAIN/mcp` endpoint using OAuth. In Supabase Authentication → OAuth Server, enable OAuth 2.1, set the authorization path to `/oauth/consent`, enable dynamic client registration, and retain disabled public signup. The production connector then works independently of this computer.
 

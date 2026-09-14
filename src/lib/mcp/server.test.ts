@@ -58,6 +58,7 @@ describe("SFL Brain MCP server", () => {
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "get_today_candidates",
       "get_available_destinations",
+      "get_on_hold_opportunities",
       "search_sfl_library",
       "get_product_context",
       "get_content_opportunity_context",
@@ -89,10 +90,14 @@ describe("SFL Brain MCP server", () => {
       const tools = (await hostedClient.listTools()).tools;
       expect(tools.map((tool) => tool.name)).toEqual([
         "get_today_candidates",
-        "get_available_destinations",
+      "get_available_destinations",
+      "get_on_hold_opportunities",
         "create_content_opportunity",
         "update_content_opportunity",
-        "record_post",
+      "record_post",
+      "place_content_opportunity_on_hold",
+      "update_content_opportunity_hold",
+      "release_content_opportunity_hold",
         "search_sfl_library",
         "get_product_context",
         "get_content_opportunity_context",
@@ -103,6 +108,9 @@ describe("SFL Brain MCP server", () => {
         "create_content_opportunity",
         "update_content_opportunity",
         "record_post",
+        "place_content_opportunity_on_hold",
+        "update_content_opportunity_hold",
+        "release_content_opportunity_hold",
       ]);
       expect(tools.map((tool) => tool.name)).not.toContain("create_development_test_opportunity");
     } finally {

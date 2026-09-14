@@ -15,20 +15,23 @@ const writeTool = (name: string) => ({
 });
 
 describe("MCP smoke contract", () => {
-  it("expects seven local reads and three hosted writes", () => {
-    expect(expectedToolNames("local")).toHaveLength(7);
+  it("expects eight local reads and six hosted writes", () => {
+    expect(expectedToolNames("local")).toHaveLength(8);
     expect(expectedToolNames("hosted")).toEqual([
-      ...expectedToolNames("local").slice(0, 2),
+      ...expectedToolNames("local").slice(0, 3),
       "create_content_opportunity",
       "update_content_opportunity",
       "record_post",
-      ...expectedToolNames("local").slice(2),
+      "place_content_opportunity_on_hold",
+      "update_content_opportunity_hold",
+      "release_content_opportunity_hold",
+      ...expectedToolNames("local").slice(3),
     ]);
   });
 
   it("accepts truthful annotations for the hosted contract", () => {
     const tools = expectedToolNames("hosted").map((name) =>
-      name.startsWith("create_") || name.startsWith("update_") || name === "record_post"
+      name.startsWith("create_") || name.startsWith("update_") || name.startsWith("place_") || name.startsWith("release_") || name === "record_post"
         ? writeTool(name)
         : readTool(name),
     );

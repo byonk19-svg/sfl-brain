@@ -23,6 +23,11 @@ const optionalMinutes = z.preprocess(
   z.number().int().min(0).max(480).optional(),
 );
 
+const optionalDate = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.iso.date().optional(),
+);
+
 const uuidList = z.preprocess(
   (value) => (Array.isArray(value) ? value : value ? [value] : []),
   z.array(z.uuid()).max(100).transform((values) => [...new Set(values)]),
@@ -217,6 +222,27 @@ export const recordPostSchema = z.object({
   angle: optionalText,
   performance_label: z.enum(["unknown", "weak", "normal", "winner"]).default("unknown"),
   notes: optionalText,
+});
+
+export const placeOpportunityHoldSchema = z.object({
+  opportunity_id: z.uuid(),
+  hold_reason: z.string().trim().min(1).max(2_000),
+  release_condition: z.string().trim().min(1).max(2_000),
+  review_on: optionalDate,
+});
+
+export const updateOpportunityHoldSchema = z.object({
+  hold_id: z.uuid(),
+  expected_updated_at: z.iso.datetime({ offset: true }),
+  hold_reason: z.string().trim().min(1).max(2_000),
+  release_condition: z.string().trim().min(1).max(2_000),
+  review_on: optionalDate,
+});
+
+export const releaseOpportunityHoldSchema = z.object({
+  hold_id: z.uuid(),
+  expected_updated_at: z.iso.datetime({ offset: true }),
+  release_note: optionalText,
 });
 
 export const ALLOWED_UPLOAD_TYPES = [

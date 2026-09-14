@@ -1,6 +1,7 @@
 const localToolNames = [
   "get_today_candidates",
   "get_available_destinations",
+  "get_on_hold_opportunities",
   "search_sfl_library",
   "get_product_context",
   "get_content_opportunity_context",
@@ -12,12 +13,15 @@ const hostedWriteNames = [
   "create_content_opportunity",
   "update_content_opportunity",
   "record_post",
+  "place_content_opportunity_on_hold",
+  "update_content_opportunity_hold",
+  "release_content_opportunity_hold",
 ];
 
 /** @param {"local" | "hosted"} mode */
 export function expectedToolNames(mode) {
   return mode === "hosted"
-    ? [...localToolNames.slice(0, 2), ...hostedWriteNames, ...localToolNames.slice(2)]
+    ? [...localToolNames.slice(0, 3), ...hostedWriteNames, ...localToolNames.slice(3)]
     : [...localToolNames];
 }
 
