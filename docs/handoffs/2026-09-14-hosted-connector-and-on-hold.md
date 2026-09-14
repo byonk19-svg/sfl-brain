@@ -84,6 +84,7 @@ pnpm mcp:smoke
 - Feature plans retain unchecked boxes from their original authoring and are not current completion trackers.
 - The reviewed responsive and provenance corrections are in pull request #1 but are not part of the last verified production deployment.
 - A complete disposable website edit/release cycle and confirmed ChatGPT hold-mutation cycle were not rerun: local Docker was unavailable, and the review did not mutate Elaine's production content.
+- Docker Desktop 4.90.0 currently crashes before starting its Linux engine because `C:\Users\byonk\AppData\Local\Docker\run\sailor-ingest.sock` is a stale, inaccessible zero-byte reparse point. Stopping Docker processes did not unlock it. A follow-up removal command was blocked before execution by command-safety policy, so no WSL distribution, Docker image, volume, container, or project data was changed. Do not use Docker's factory reset for this acceptance gap.
 
 ## Guardrails
 
