@@ -1,5 +1,7 @@
 # Hosted ChatGPT Connector Implementation Plan
 
+> **Status:** Implemented on `codex/hosted-chatgpt-connector` and under review in pull request #1. Unchecked boxes preserve the original plan syntax; use Git, the pull request, and the newest file in `docs/handoffs/` for current state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make SFL Brain's authenticated read/write MCP connector available through the existing Vercel deployment without depending on a local computer or tunnel.

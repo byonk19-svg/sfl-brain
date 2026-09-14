@@ -1,5 +1,7 @@
 # SFL Brain v0.2 Content Opportunities Implementation Plan
 
+> **Status:** Historical execution plan, not a current progress tracker. Unchecked boxes preserve the original plan syntax; use Git history, `README.md`, and the newest file in `docs/handoffs/` for implemented state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Content Opportunity the first-class editorial backlog and Today-ranking unit while preserving the v0.1 product database and five read-only MCP tools.

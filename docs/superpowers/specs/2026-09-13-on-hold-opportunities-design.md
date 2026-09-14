@@ -44,7 +44,7 @@ Opportunity loading includes the current hold and hold history where required. T
 - `on_hold`: unarchived opportunities with an active hold
 - `all`: all unarchived opportunities, including holds
 
-Today and recent candidate inputs use `active`; held opportunities never enter scoring. The Content backlog uses `active`. The On hold tab uses `on_hold`. An explicit website search remains scoped to the selected tab. MCP search and direct opportunity lookup use `all`, label held results On hold, and include the current reason, condition, review date, and due state.
+Today and recent candidate inputs use `active`; held opportunities never enter scoring. The Content backlog uses `active` when no query is present. A non-empty search from the Content backlog uses `all` so a specifically requested held item remains discoverable and visibly labeled On hold. The On hold tab uses `on_hold`, including for its own searches. MCP search and direct opportunity lookup use `all` and include the current reason, condition, review date, and due state.
 
 The On hold tab ordering is:
 
@@ -119,7 +119,7 @@ Automated database and application tests must prove:
 9. The exact Arhaus record is held with the approved text, no review date, Idea preserved, and Next step cleared.
 10. Existing content, product, publication, authentication, and hosted connector behavior remains green.
 
-Browser acceptance must verify desktop and narrow layouts, keyboard access to the quick hold form, tab-scoped search, due-review styling, detail editing, manual release, and the equivalent confirmed ChatGPT hold flow. Canonical lint, typecheck, unit/integration tests, production build, hosted migration verification, and persisted-state checks remain required.
+Browser acceptance must verify desktop and narrow layouts, keyboard access to the quick hold form, active-plus-held Content backlog search, On hold-only search, due-review styling, detail editing, manual release, and the equivalent confirmed ChatGPT hold flow. Canonical lint, typecheck, unit/integration tests, production build, hosted migration verification, and persisted-state checks remain required.
 
 ## Deferred scope
 

@@ -2,6 +2,8 @@
 
 SFL Brain is the private content-memory and recommendation backend for the Styled For Less workflow. It stores an editorial backlog as **Content Opportunities**, then connects each opportunity to products, retailer listings, affiliate links, private assets, destination publications, performance, and manually entered Revival Radar events.
 
+Durable product direction lives in [the product vision](docs/PRODUCT_VISION.md). A new maintainer or agent should also read the [latest dated handoff](docs/handoffs/2026-09-14-hosted-connector-and-on-hold.md) and verify its time-sensitive claims.
+
 ChatGPT remains the conversational assistant. SFL Brain makes **no OpenAI API calls** and requires no OpenAI API key.
 
 > [!WARNING]
@@ -28,7 +30,7 @@ Stages are Idea, Needs assets, Needs links, Needs caption, Ready, Posted, and Re
 ## App surfaces
 
 - `/today` — opportunity recommendations with Best, 5-minute, 15-minute, Closest to done, No new pictures, and Revive filters
-- `/library` — Content Backlog by default; switch to Product Catalog when maintaining product facts
+- `/library` — active Content Backlog by default, with separate On hold and Product Catalog views
 - `/add` — ten-second content capture: title, stage, type, optional note
 - `/products/new` — secondary product-administration form
 - `/opportunities/[id]` — stage, next action, products, links, assets, destination history, and reversible archive state
@@ -102,7 +104,7 @@ Posted content is excluded from ordinary Today results. It returns only when a R
 
 ## MCP tools
 
-The seven read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
+The eight read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
 
 - `get_today_candidates` — opportunity-centered recommendations
 - `get_available_destinations` — lists active destinations before recording a publication
