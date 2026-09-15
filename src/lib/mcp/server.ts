@@ -1,24 +1,48 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { createPilotOpportunitySchema, recordPilotPostSchema, updatePilotOpportunitySchema, type CreatePilotOpportunityInput, type RecordPilotPostInput, type UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
+import { placeHoldSchema, releaseHoldSchema, updateHoldSchema, type PlaceHoldInput, type ReleaseHoldInput, type UpdateHoldInput } from "@/lib/mcp/hold-schemas";
 
-import type { TodayCandidate, TodayFilters } from "@/lib/recommendations";
+import type {
+  TodayContentCandidate,
+  TodayContentFilters,
+} from "@/lib/content-recommendations";
 
 type JsonRecord = Record<string, unknown>;
 
 export interface BrainReader {
-  getTodayCandidates(filters: TodayFilters): Promise<TodayCandidate[]>;
+  getTodayCandidates(filters: TodayContentFilters): Promise<TodayContentCandidate[]>;
+  searchContentBacklog(query: string, limit: number, scope?: "active" | "on_hold" | "all"): Promise<JsonRecord[]>;
+  searchOnHoldOpportunities?(query: string, limit: number): Promise<JsonRecord[]>;
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
+  getOpportunityContext(opportunityId: string): Promise<JsonRecord | null>;
+  createDevelopmentTestOpportunity?(requestId: string): Promise<string>;
+  getAvailableDestinations?(): Promise<JsonRecord[]>;
+  createPilotContentOpportunity?(input: CreatePilotOpportunityInput): Promise<JsonRecord>;
+  updatePilotContentOpportunity?(input: UpdatePilotOpportunityInput): Promise<JsonRecord>;
+  recordPilotPost?(input: RecordPilotPostInput): Promise<JsonRecord>;
+  placeContentOpportunityOnHold?(input: PlaceHoldInput): Promise<JsonRecord>;
+  updateContentOpportunityHold?(input: UpdateHoldInput): Promise<JsonRecord>;
+  releaseContentOpportunityHold?(input: ReleaseHoldInput): Promise<JsonRecord>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
     destinationId?: string;
+    contentOpportunityId?: string;
   }): Promise<JsonRecord[]>;
   getRevivalEvents(activeOnly: boolean, limit: number): Promise<JsonRecord[]>;
 }
 
 const readOnlyAnnotations = {
   readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const developmentWriteAnnotations = {
+  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
@@ -51,9 +75,12 @@ function failure(error: unknown) {
   };
 }
 
-export function createSflMcpServer(reader: BrainReader) {
+export function createSflMcpServer(
+  reader: BrainReader,
+  options: { enableDevelopmentTestWrite?: boolean; enablePilotWrites?: boolean } = {},
+) {
   const server = new McpServer(
-    { name: "sfl-brain", version: "0.1.0" },
+    { name: "sfl-brain", version: "0.2.1" },
     {
       instructions:
         "Read-only facts and deterministic recommendations for Styled For Less. Use these tools to ground editorial judgment; never imply that the Brain publishes or monitors retailers.",
@@ -67,8 +94,10 @@ export function createSflMcpServer(reader: BrainReader) {
       description:
         "Use when the user asks what to post today, wants a quick or low-effort post, asks what is worth resurfacing, or wants to compare available posting opportunities.",
       inputSchema: z.object({
-        max_effort_minutes: z.number().int().positive().max(30).optional(),
+        max_effort_minutes: z.number().int().positive().max(480).optional(),
         no_new_photos: z.boolean().optional(),
+        candidate_type: z.literal("revival").optional(),
+        sort: z.enum(["best", "closest_to_done"]).optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
       annotations: readOnlyAnnotations,
@@ -89,11 +118,66 @@ export function createSflMcpServer(reader: BrainReader) {
     },
   );
 
+  if (options.enableDevelopmentTestWrite) {
+    server.registerTool(
+      "create_development_test_opportunity",
+      {
+        title: "Create Development Test Opportunity",
+        description:
+          "Development-only write test. Creates one clearly labeled demo content opportunity for a caller-provided request ID; repeat calls with the same ID return the same record.",
+        inputSchema: z.object({ request_id: z.uuid() }),
+        annotations: developmentWriteAnnotations,
+      },
+      async ({ request_id }) => {
+        try {
+          if (!reader.createDevelopmentTestOpportunity) {
+            return failure(new Error("Development test writing is not configured"));
+          }
+          const opportunity = {
+            id: await reader.createDevelopmentTestOpportunity(request_id),
+          };
+          return success(
+            "opportunity",
+            opportunity,
+            "Development test opportunity saved. Use its ID with get_content_opportunity_context.",
+          );
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    );
+  }
+
+  server.registerTool("get_available_destinations", {
+    title: "Get Available Destinations", description: "Read active posting destinations before recording an actual publication.", inputSchema: z.object({}), annotations: readOnlyAnnotations,
+  }, async () => { try { return success("destinations", await reader.getAvailableDestinations?.() ?? [], "Active posting destinations."); } catch (error) { return failure(error); } });
+
+  server.registerTool("get_on_hold_opportunities", { title: "Get On-Hold Opportunities", description: "List retained opportunities that are excluded from active work, ordered for manual review.", inputSchema: z.object({ query: z.string().trim().max(200).default(""), limit: z.number().int().min(1).max(100).default(20) }), annotations: readOnlyAnnotations }, async ({ query, limit }) => {
+    try { return success("opportunities", await reader.searchOnHoldOpportunities?.(query, limit) ?? [], "On-hold content opportunities."); } catch (error) { return failure(error); }
+  });
+
+  if (options.enablePilotWrites) {
+    const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
+    server.registerTool("create_content_opportunity", { title: "Save Content Idea", description: "Save a real content idea. Use only when the user asks to save it; products, links, and assets are optional.", inputSchema: createPilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.createPilotContentOpportunity) return unavailable("Create content opportunity"); const result = await reader.createPilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, saved_state: sanitize(saved) }, "Content idea saved."); } catch (error) { return failure(error); }
+    });
+    server.registerTool("update_content_opportunity", { title: "Update Content Progress", description: "Update explicitly supplied progress fields on a verified content opportunity. Use its latest updated_at from context; omitted fields remain unchanged and null clears only that field.", inputSchema: updatePilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.updatePilotContentOpportunity) return unavailable("Update content opportunity"); const result = await reader.updatePilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, changed_fields: result.changed_fields, saved_state: sanitize(saved) }, "Content progress saved."); } catch (error) { return failure(error); }
+    });
+    server.registerTool("record_post", { title: "Record Actual Publication", description: "Record one publication that already happened to one verified destination. This never publishes externally.", inputSchema: recordPilotPostSchema, annotations: developmentWriteAnnotations }, async (args) => {
+      try { if (!reader.recordPilotPost) return unavailable("Record post"); return success("publication", await reader.recordPilotPost(args), "Actual publication recorded."); } catch (error) { return failure(error); }
+    });
+    server.registerTool("place_content_opportunity_on_hold", { title: "Put Content On Hold", description: "Put a verified opportunity on hold only after the user confirms the reason and release condition.", inputSchema: placeHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.placeContentOpportunityOnHold) return unavailable("Place hold"); const hold = await reader.placeContentOpportunityOnHold(args); return success("hold", hold, "Content opportunity moved to On hold."); } catch (error) { return failure(error); } });
+    server.registerTool("update_content_opportunity_hold", { title: "Update Content Hold", description: "Update the current hold after an explicit user request and fresh read.", inputSchema: updateHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.updateContentOpportunityHold) return unavailable("Update hold"); return success("hold", await reader.updateContentOpportunityHold(args), "Hold details updated."); } catch (error) { return failure(error); } });
+    server.registerTool("release_content_opportunity_hold", { title: "Return Content To Backlog", description: "Manually release the current hold only after the user confirms.", inputSchema: releaseHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.releaseContentOpportunityHold) return unavailable("Release hold"); return success("hold", await reader.releaseContentOpportunityHold(args), "Content opportunity returned to the active backlog."); } catch (error) { return failure(error); } });
+  }
+
   server.registerTool(
     "search_sfl_library",
     {
       title: "Search SFL Library",
-      description: "Search stored products by product name, brand, retailer, or tag.",
+      description:
+        "Search content opportunities and underlying products by opportunity title, stage, next action, product name, brand, retailer, or tag.",
       inputSchema: z.object({
         query: z.string().trim().min(1).max(200),
         limit: z.number().int().min(1).max(100).default(20),
@@ -102,8 +186,23 @@ export function createSflMcpServer(reader: BrainReader) {
     },
     async ({ query, limit }) => {
       try {
-        const products = sanitize(await reader.searchLibrary(query, limit));
-        return success("products", products, `Library matches for “${query}”.`);
+        const [opportunities, products] = await Promise.all([
+          reader.searchContentBacklog(query, limit, "all"),
+          reader.searchLibrary(query, limit),
+        ]);
+        const safeResults = sanitize({ opportunities, products }) as {
+          opportunities: JsonRecord[];
+          products: JsonRecord[];
+        };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Library matches for “${query}”: ${opportunities.length} content opportunities and ${products.length} products.\n\n${JSON.stringify(safeResults, null, 2)}`,
+            },
+          ],
+          structuredContent: safeResults,
+        };
       } catch (error) {
         return failure(error);
       }
@@ -132,6 +231,31 @@ export function createSflMcpServer(reader: BrainReader) {
   );
 
   server.registerTool(
+    "get_content_opportunity_context",
+    {
+      title: "Get Content Opportunity Context",
+      description:
+        "Get a content opportunity's stage, editorial notes, attached products and links, prepared assets, publication and destination history, metrics, and Revival Radar events.",
+      inputSchema: z.object({ opportunity_id: z.uuid() }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ opportunity_id }) => {
+      try {
+        const opportunity = await reader.getOpportunityContext(opportunity_id);
+        if (!opportunity) return failure(new Error("Content opportunity not found"));
+        const safeOpportunity = sanitize(opportunity);
+        return success(
+          "opportunity",
+          safeOpportunity,
+          `Complete stored context for ${String(opportunity.title ?? "this content opportunity")}.`,
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "get_recent_posts",
     {
       title: "Get Recent Posts",
@@ -140,16 +264,18 @@ export function createSflMcpServer(reader: BrainReader) {
         days: z.number().int().min(1).max(3650).default(30),
         product_id: z.uuid().optional(),
         destination_id: z.uuid().optional(),
+        content_opportunity_id: z.uuid().optional(),
       }),
       annotations: readOnlyAnnotations,
     },
-    async ({ days, product_id, destination_id }) => {
+    async ({ days, product_id, destination_id, content_opportunity_id }) => {
       try {
         const posts = sanitize(
           await reader.getRecentPosts({
             days,
             productId: product_id,
             destinationId: destination_id,
+            contentOpportunityId: content_opportunity_id,
           }),
         );
         return success("posts", posts, `Posts published in the last ${days} days.`);

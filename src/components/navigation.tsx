@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const links = [
   { href: "/today", label: "Today", mark: "●" },
-  { href: "/library", label: "Library", mark: "⌕" },
-  { href: "/add", label: "Add", mark: "+" },
+  { href: "/library", label: "Backlog", mark: "⌕" },
+  { href: "/add", label: "Add Content", mark: "+" },
   { href: "/record-post", label: "Record Post", mark: "✓" },
 ];
 
@@ -25,6 +25,7 @@ export function Navigation() {
           </Link>
         ))}
       </div>
+      <form action="/signout" method="post"><button className="text-button" type="submit">Sign out</button></form>
       <p className="privacy-note">Private workspace · local MVP</p>
     </nav>
   );

@@ -5,21 +5,34 @@ import type { z } from "zod";
 
 import { getServerEnv } from "@/lib/env";
 import {
-  getTodayCandidates,
+  getTodayContentCandidates,
+  type TodayContentFilters,
+} from "@/lib/content-recommendations";
+import { OpportunityRepository } from "@/lib/opportunity-repository";
+import type { CreatePilotOpportunityInput, RecordPilotPostInput, UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
+import {
   type RecommendationInput,
-  type TodayFilters,
 } from "@/lib/recommendations";
 import type {
   affiliateLinkSchema,
+  createOpportunitySchema,
   createProductSchema,
+  editOpportunitySchema,
   editProductSchema,
   listingSchema,
+  opportunityAssetSchema,
+  opportunityProductSchema,
   radarEventSchema,
   recordPostSchema,
 } from "@/lib/validation";
 import { validateUpload } from "@/lib/validation";
 
 type JsonRecord = Record<string, unknown>;
+
+export type MutationActor = {
+  userId: string;
+  source: "website" | "chatgpt_connector";
+};
 
 interface ProductGraphRow {
   id: string;
@@ -133,7 +146,24 @@ export class BrainService {
   constructor(
     private readonly client: SupabaseClient,
     private readonly workspaceId: string,
+    private readonly mutationActor?: MutationActor,
   ) {}
+
+  private mcpMutationContext() {
+    return this.mutationActor
+      ? {
+          p_actor_user_id: this.mutationActor.userId,
+          p_source: this.mutationActor.source,
+        }
+      : {
+          p_actor_user_id: null,
+          p_source: "development_tunnel" as const,
+        };
+  }
+
+  private opportunityRepository() {
+    return new OpportunityRepository(this.client, this.workspaceId);
+  }
 
   private async productGraph() {
     const result = await this.client
@@ -149,8 +179,35 @@ export class BrainService {
     return (await this.productGraph()).map(toRecommendationInput);
   }
 
-  async getTodayCandidates(filters: TodayFilters = {}) {
-    return getTodayCandidates(await this.getRecommendationInputs(), filters);
+  async getContentOpportunityInputs() {
+    return this.opportunityRepository().inputs();
+  }
+
+  async getRecentContentMix(limit = 5) {
+    return this.opportunityRepository().recentMix(limit);
+  }
+
+  async getTodayCandidates(filters: TodayContentFilters = {}) {
+    return getTodayContentCandidates(
+      await this.getContentOpportunityInputs(),
+      filters,
+    );
+  }
+
+  async searchContentBacklog(
+    query = "",
+    limit = 100,
+    scope: import("@/lib/opportunity-repository").OpportunityAttentionScope = "active",
+  ) {
+    return this.opportunityRepository().search(query, limit, scope);
+  }
+
+  async searchOnHoldOpportunities(query = "", limit = 100) {
+    return this.opportunityRepository().search(query, limit, "on_hold");
+  }
+
+  async getOpportunityContext(opportunityId: string) {
+    return this.opportunityRepository().context(opportunityId);
   }
 
   async searchLibrary(query = "", limit = 50): Promise<JsonRecord[]> {
@@ -209,7 +266,7 @@ export class BrainService {
     const result = await this.client
       .from("products")
       .select(
-        "*,listings(*,affiliate_links(*)),asset_products(role,assets(*)),post_products(role,posts(*,destinations(*),post_assets(position,assets(id,title,asset_type,source,captured_at)),post_metrics(*))),radar_events(*)",
+        "*,listings(*,affiliate_links(*)),asset_products(role,assets(*)),post_products(role,posts(*,destinations(*),post_assets(position,assets(id,title,asset_type,source,captured_at)),post_metrics(*))),radar_events(*),content_opportunity_products(role,content_opportunities(id,title,status,content_type,next_action,estimated_minutes_remaining,archived_at))",
       )
       .eq("workspace_id", this.workspaceId)
       .eq("id", productId)
@@ -242,25 +299,29 @@ export class BrainService {
     days: number;
     productId?: string;
     destinationId?: string;
+    contentOpportunityId?: string;
   }): Promise<JsonRecord[]> {
     const productSelection = options.productId
       ? "post_products!inner(product_id,products(id,name))"
       : "post_products(product_id,products(id,name))";
     let query = this.client
       .from("posts")
-      .select(`id,published_at,caption,angle,performance_label,notes,destination_id,destinations(id,name,platform),${productSelection},post_assets(asset_id,position,assets(id,title,asset_type))`)
+      .select(`id,published_at,caption,angle,performance_label,notes,destination_id,content_opportunity_id,content_opportunities(id,title,status,content_type),destinations(id,name,platform),${productSelection},post_assets(asset_id,position,assets(id,title,asset_type))`)
       .eq("workspace_id", this.workspaceId)
       .gte("published_at", new Date(Date.now() - options.days * 86_400_000).toISOString())
       .order("published_at", { ascending: false });
     if (options.destinationId) query = query.eq("destination_id", options.destinationId);
     if (options.productId) query = query.eq("post_products.product_id", options.productId);
+    if (options.contentOpportunityId) {
+      query = query.eq("content_opportunity_id", options.contentOpportunityId);
+    }
     return assertResult(await query, "Load recent posts") as unknown as JsonRecord[];
   }
 
   async getRevivalEvents(activeOnly = true, limit = 20): Promise<JsonRecord[]> {
     let query = this.client
       .from("radar_events")
-      .select("id,event_type,source,happened_at,expires_at,dismissed_at,metadata,products(id,name),listings(id,retailer,current_price,currency,stock_status)")
+      .select("id,event_type,source,happened_at,expires_at,dismissed_at,metadata,products(id,name,content_opportunity_products(role,content_opportunities(id,title,status,content_type,archived_at))),listings(id,retailer,current_price,currency,stock_status)")
       .eq("workspace_id", this.workspaceId)
       .lte("happened_at", new Date().toISOString())
       .order("happened_at", { ascending: false })
@@ -272,16 +333,156 @@ export class BrainService {
   }
 
   async getFormOptions() {
-    const [products, destinations, assets] = await Promise.all([
+    const [products, destinations, assets, opportunities] = await Promise.all([
       this.client.from("products").select("id,name").eq("workspace_id", this.workspaceId).eq("lifecycle_status", "active").order("name"),
       this.client.from("destinations").select("id,name,platform").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
       this.client.from("assets").select("id,title,asset_type").eq("workspace_id", this.workspaceId).order("created_at", { ascending: false }),
+      this.client.from("content_opportunities").select("id,title,status,content_type,content_opportunity_products(product_id),content_opportunity_assets(asset_id)").eq("workspace_id", this.workspaceId).is("archived_at", null).order("title"),
     ]);
     return {
       products: assertResult(products, "Load products"),
       destinations: assertResult(destinations, "Load destinations"),
       assets: assertResult(assets, "Load assets"),
+      opportunities: assertResult(opportunities, "Load content opportunities"),
     };
+  }
+
+  async getAvailableDestinations(): Promise<JsonRecord[]> {
+    return assertResult(
+      await this.client.from("destinations").select("id,name,platform").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
+      "Load destinations",
+    ) as unknown as JsonRecord[];
+  }
+
+  async createPilotContentOpportunity(input: CreatePilotOpportunityInput) {
+    return assertResult(await this.client.rpc("create_mcp_content_opportunity", {
+      p_workspace_id: this.workspaceId, p_request_id: input.request_id, p_payload: input,
+      ...this.mcpMutationContext(),
+    }), "Create conversational content opportunity") as JsonRecord;
+  }
+
+  async updatePilotContentOpportunity(input: UpdatePilotOpportunityInput) {
+    const { request_id, opportunity_id, expected_updated_at, ...patch } = input;
+    return assertResult(await this.client.rpc("update_mcp_content_opportunity", {
+      p_workspace_id: this.workspaceId, p_request_id: request_id, p_opportunity_id: opportunity_id,
+      p_expected_updated_at: expected_updated_at, p_patch: patch, p_payload: input,
+      ...this.mcpMutationContext(),
+    }), "Update conversational content opportunity") as JsonRecord;
+  }
+
+  async recordPilotPost(input: RecordPilotPostInput) {
+    return assertResult(await this.client.rpc("record_mcp_post", {
+      p_workspace_id: this.workspaceId, p_request_id: input.request_id, p_opportunity_id: input.opportunity_id,
+      p_destination_id: input.destination_id, p_published_at: new Date(input.published_at).toISOString(),
+      p_asset_ids: input.asset_ids, p_caption: input.caption ?? null, p_angle: input.angle ?? null,
+      p_performance_label: input.performance_label, p_payload: input,
+      ...this.mcpMutationContext(),
+    }), "Record conversational post") as JsonRecord;
+  }
+
+  private holdActor() {
+    if (!this.mutationActor) throw new Error("Hold mutation actor is required.");
+    return {
+      p_actor_user_id: this.mutationActor.userId,
+      p_source: this.mutationActor.source,
+    };
+  }
+
+  async placeContentOpportunityOnHold(input: {
+    opportunity_id: string;
+    request_id?: string | null;
+    hold_reason: string;
+    release_condition: string;
+    review_on?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("place_content_opportunity_on_hold", {
+      p_workspace_id: this.workspaceId,
+      p_opportunity_id: input.opportunity_id,
+      p_request_id: input.request_id ?? null,
+      p_hold_reason: input.hold_reason,
+      p_release_condition: input.release_condition,
+      p_review_on: input.review_on ?? null,
+      ...this.holdActor(),
+    }), "Place content opportunity on hold") as JsonRecord;
+  }
+
+  async updateContentOpportunityHold(input: {
+    hold_id: string;
+    request_id?: string | null;
+    expected_updated_at: string;
+    hold_reason: string;
+    release_condition: string;
+    review_on?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("update_content_opportunity_hold", {
+      p_workspace_id: this.workspaceId,
+      p_hold_id: input.hold_id,
+      p_request_id: input.request_id ?? null,
+      p_expected_updated_at: input.expected_updated_at,
+      p_hold_reason: input.hold_reason,
+      p_release_condition: input.release_condition,
+      p_review_on: input.review_on ?? null,
+      ...this.holdActor(),
+    }), "Update content opportunity hold") as JsonRecord;
+  }
+
+  async releaseContentOpportunityHold(input: {
+    hold_id: string;
+    request_id?: string | null;
+    expected_updated_at: string;
+    release_note?: string | null;
+  }) {
+    return assertResult(await this.client.rpc("release_content_opportunity_hold", {
+      p_workspace_id: this.workspaceId,
+      p_hold_id: input.hold_id,
+      p_request_id: input.request_id ?? null,
+      p_expected_updated_at: input.expected_updated_at,
+      p_release_note: input.release_note ?? null,
+      ...this.holdActor(),
+    }), "Release content opportunity hold") as JsonRecord;
+  }
+
+  async createContentOpportunity(
+    input: z.infer<typeof createOpportunitySchema>,
+  ) {
+    return this.opportunityRepository().create(input);
+  }
+
+  async createDevelopmentTestOpportunity(requestId: string) {
+    return this.opportunityRepository().createDevelopmentTestOpportunity(requestId);
+  }
+
+  async updateContentOpportunity(
+    input: z.infer<typeof editOpportunitySchema>,
+  ) {
+    return this.opportunityRepository().update(input);
+  }
+
+  async attachOpportunityProduct(
+    input: z.infer<typeof opportunityProductSchema>,
+  ) {
+    return this.opportunityRepository().attachProduct(input);
+  }
+
+  async attachOpportunityAsset(
+    input: z.infer<typeof opportunityAssetSchema>,
+  ) {
+    return this.opportunityRepository().attachAsset(input);
+  }
+
+  async detachOpportunityProduct(opportunityId: string, productId: string) {
+    return this.opportunityRepository().detachProduct(opportunityId, productId);
+  }
+
+  async detachOpportunityAsset(opportunityId: string, assetId: string) {
+    return this.opportunityRepository().detachAsset(opportunityId, assetId);
+  }
+
+  async setContentOpportunityArchived(
+    opportunityId: string,
+    archived: boolean,
+  ) {
+    return this.opportunityRepository().setArchived(opportunityId, archived);
   }
 
   async createProduct(input: z.infer<typeof createProductSchema>) {
@@ -381,6 +582,7 @@ export class BrainService {
     return assertResult(
       await this.client.rpc("record_post", {
         p_workspace_id: this.workspaceId,
+        p_content_opportunity_id: input.content_opportunity_id,
         p_destination_id: input.destination_id,
         p_published_at: input.published_at,
         p_product_ids: input.product_ids,
@@ -395,18 +597,25 @@ export class BrainService {
   }
 
   async uploadAsset(options: {
-    productId: string;
+    productId?: string;
+    opportunityId?: string;
     title?: string;
     source: "home" | "in_store" | "canva" | "web" | "other";
     file: File;
   }) {
+    if (!options.productId && !options.opportunityId) {
+      throw new Error("Choose a product or content opportunity for this asset.");
+    }
     if (!["home", "in_store", "canva", "web", "other"].includes(options.source)) {
       throw new Error("Choose a valid asset source.");
     }
     const validationError = validateUpload(options.file);
     if (validationError) throw new Error(validationError);
     const extension = options.file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
-    const storagePath = `${this.workspaceId}/${options.productId}/${crypto.randomUUID()}.${extension}`;
+    const ownerPath = options.productId
+      ? `products/${options.productId}`
+      : `opportunities/${options.opportunityId}`;
+    const storagePath = `${this.workspaceId}/${ownerPath}/${crypto.randomUUID()}.${extension}`;
     const upload = await this.client.storage.from("sfl-assets").upload(storagePath, options.file, {
       contentType: options.file.type,
       upsert: false,
@@ -431,27 +640,43 @@ export class BrainService {
           .single(),
         "Save asset metadata",
       ) as { id: string };
-      const join = await this.client.from("asset_products").insert({
-        asset_id: asset.id,
-        product_id: options.productId,
-        role: "primary",
-      });
-      if (join.error) {
-        await this.client.from("assets").delete().eq("id", asset.id);
-        throw new Error(`Associate asset: ${join.error.message}`);
+      if (options.productId) {
+        const join = await this.client.from("asset_products").insert({
+          asset_id: asset.id,
+          product_id: options.productId,
+          role: "primary",
+        });
+        if (join.error) {
+          throw new Error(`Associate asset with product: ${join.error.message}`);
+        }
+      }
+      if (options.opportunityId) {
+        await this.attachOpportunityAsset({
+          opportunity_id: options.opportunityId,
+          asset_id: asset.id,
+          role: "primary",
+        });
       }
       return asset.id;
     } catch (error) {
+      await this.client.from("assets").delete().eq("storage_path", storagePath);
       await this.client.storage.from("sfl-assets").remove([storagePath]);
       throw error;
     }
   }
 }
 
-export function createBrainService() {
+export function createBrainService(
+  workspaceId?: string,
+  mutationActor?: MutationActor,
+) {
   const env = getServerEnv();
   const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  return new BrainService(client, env.SFL_WORKSPACE_ID);
+  return new BrainService(
+    client,
+    workspaceId ?? env.SFL_WORKSPACE_ID,
+    mutationActor,
+  );
 }

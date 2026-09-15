@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
+    "acceptance:hold": "node scripts/local-hold-acceptance.mjs",
+    "acceptance:mcp-hold": "node scripts/local-hosted-hold-acceptance.mjs",
     "supabase:start": "pnpm dlx supabase@2.116.0 start",
     "supabase:stop": "pnpm dlx supabase@2.116.0 stop",
     "supabase:reset": "pnpm dlx supabase@2.116.0 db reset"
@@ -20,6 +22,7 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "2.115.0",
     "next": "16.3.4",
     "react": "19.2.8",
@@ -38,6 +41,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "jsdom": "30.0.1",
+    "supabase": "2.116.0",
     "typescript": "^5",
     "vitest": "5.0.0"
   },

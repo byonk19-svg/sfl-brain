@@ -1,0 +1,106 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { describe, expect, it, vi } from "vitest";
+
+import { BrainService } from "@/lib/brain";
+
+const requestId = "a0000000-0000-4000-8000-000000000001";
+const opportunityId = "a0000000-0000-4000-8000-000000000002";
+const destinationId = "a0000000-0000-4000-8000-000000000003";
+
+function service() {
+  const rpc = vi.fn().mockResolvedValue({ data: { opportunity_id: opportunityId }, error: null });
+  const brain = new BrainService(
+    { rpc } as unknown as SupabaseClient,
+    "workspace-a",
+    { userId: "user-a", source: "chatgpt_connector" },
+  );
+  return { brain, rpc };
+}
+
+describe("audited conversational writes", () => {
+  it("passes actor identity to content-opportunity creation", async () => {
+    const { brain, rpc } = service();
+    await brain.createPilotContentOpportunity({
+      request_id: requestId,
+      title: "Corinne box refresh",
+      status: "idea",
+      content_type: "comparison",
+    });
+    expect(rpc).toHaveBeenCalledWith("create_mcp_content_opportunity", expect.objectContaining({
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+  });
+
+  it("passes actor identity to content-opportunity updates", async () => {
+    const { brain, rpc } = service();
+    await brain.updatePilotContentOpportunity({
+      request_id: requestId,
+      opportunity_id: opportunityId,
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+      status: "ready",
+    });
+    expect(rpc).toHaveBeenCalledWith("update_mcp_content_opportunity", expect.objectContaining({
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+  });
+
+  it("passes actor identity to publication recording", async () => {
+    const { brain, rpc } = service();
+    await brain.recordPilotPost({
+      request_id: requestId,
+      opportunity_id: opportunityId,
+      destination_id: destinationId,
+      published_at: "2026-09-13T12:00:00.000Z",
+      asset_ids: [],
+      performance_label: "unknown",
+    });
+    expect(rpc).toHaveBeenCalledWith("record_mcp_post", expect.objectContaining({
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+  });
+
+  it("passes request and actor context to hold placement", async () => {
+    const { brain, rpc } = service();
+    await brain.placeContentOpportunityOnHold({
+      opportunity_id: opportunityId,
+      request_id: requestId,
+      hold_reason: "Affiliate access unavailable",
+      release_condition: "Affiliate access becomes available",
+      review_on: null,
+    });
+    expect(rpc).toHaveBeenCalledWith("place_content_opportunity_on_hold", expect.objectContaining({
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+      p_request_id: requestId,
+    }));
+  });
+
+  it("passes optimistic concurrency to hold updates and releases", async () => {
+    const { brain, rpc } = service();
+    await brain.updateContentOpportunityHold({
+      hold_id: "a0000000-0000-4000-8000-000000000004",
+      request_id: requestId,
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+      hold_reason: "Updated reason",
+      release_condition: "Updated condition",
+      review_on: "2026-10-01",
+    });
+    await brain.releaseContentOpportunityHold({
+      hold_id: "a0000000-0000-4000-8000-000000000004",
+      request_id: requestId,
+      expected_updated_at: "2026-09-13T12:00:00.000Z",
+      release_note: "Condition met",
+    });
+    expect(rpc).toHaveBeenNthCalledWith(1, "update_content_opportunity_hold", expect.objectContaining({
+      p_expected_updated_at: "2026-09-13T12:00:00.000Z",
+      p_source: "chatgpt_connector",
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(2, "release_content_opportunity_hold", expect.objectContaining({
+      p_expected_updated_at: "2026-09-13T12:00:00.000Z",
+      p_source: "chatgpt_connector",
+    }));
+  });
+});
