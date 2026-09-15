@@ -2,7 +2,7 @@
 
 SFL Brain is the private content-memory and recommendation backend for the Styled For Less workflow. It stores an editorial backlog as **Content Opportunities**, then connects each opportunity to products, retailer listings, affiliate links, private assets, destination publications, performance, and manually entered Revival Radar events.
 
-Durable product direction lives in [the product vision](docs/PRODUCT_VISION.md). A new maintainer or agent should also read the [latest dated handoff](docs/handoffs/2026-09-14-hosted-connector-and-on-hold.md) and verify its time-sensitive claims.
+Durable product direction lives in [the product vision](docs/PRODUCT_VISION.md). A new maintainer or agent should also read the [latest dated handoff](docs/handoffs/2026-09-15-local-acceptance-complete.md) and verify its time-sensitive claims.
 
 ChatGPT remains the conversational assistant. SFL Brain makes **no OpenAI API calls** and requires no OpenAI API key.
 

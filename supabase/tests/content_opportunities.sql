@@ -46,11 +46,13 @@ begin
 
   perform public.create_mcp_content_opportunity(
     '11111111-1111-4111-8111-111111111111', v_mcp_request_id,
+    null, 'development_tunnel',
     jsonb_build_object('title', 'Transactional MCP test', 'status', 'idea', 'content_type', 'unspecified')
   );
   begin
     perform public.create_mcp_content_opportunity(
       '11111111-1111-4111-8111-111111111111', v_mcp_request_id,
+      null, 'development_tunnel',
       jsonb_build_object('title', 'Different payload', 'status', 'idea', 'content_type', 'unspecified')
     );
     raise exception 'MCP request ID payload conflict was accepted';
@@ -59,7 +61,8 @@ begin
   end;
   begin
     perform public.update_mcp_content_opportunity(
-      '11111111-1111-4111-8111-111111111111', extensions.gen_random_uuid(), extensions.gen_random_uuid(), now(),
+      '11111111-1111-4111-8111-111111111111', extensions.gen_random_uuid(),
+      null, 'development_tunnel', extensions.gen_random_uuid(), now(),
       jsonb_build_object('notes', 'must not persist'), jsonb_build_object('notes', 'must not persist')
     );
     raise exception 'Unknown opportunity update was accepted';
