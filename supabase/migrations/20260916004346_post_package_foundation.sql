@@ -725,7 +725,7 @@ begin
   if not found then raise exception 'Distribution item was published concurrently'; end if;
   update public.post_packages
   set status = 'publishing', updated_by = p_actor_user_id, updated_source = p_source
-  where id = p_package_id;
+  where id = p_package_id and status = 'draft';
   select to_jsonb(posts.*) || jsonb_build_object(
     'distribution_item_id', p_distribution_item_id,
     'package_updated_at', (select updated_at from public.post_packages where id = p_package_id)

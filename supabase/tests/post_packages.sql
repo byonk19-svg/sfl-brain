@@ -8,6 +8,7 @@ declare
   v_actor_b uuid := 'e2000000-0000-4000-8000-000000000002';
   v_destination_a uuid := 'e3000000-0000-4000-8000-000000000001';
   v_destination_a2 uuid := 'e3000000-0000-4000-8000-000000000002';
+  v_destination_a3 uuid := 'e3000000-0000-4000-8000-000000000004';
   v_destination_b uuid := 'e3000000-0000-4000-8000-000000000003';
   v_opportunity_a uuid := 'e4000000-0000-4000-8000-000000000001';
   v_opportunity_b uuid := 'e4000000-0000-4000-8000-000000000002';
@@ -19,6 +20,7 @@ declare
   v_package jsonb;
   v_package_id uuid;
   v_package_updated_at timestamptz;
+  v_package_ctid tid;
   v_variant jsonb;
   v_variant_id uuid;
   v_variant_updated_at timestamptz;
@@ -26,6 +28,7 @@ declare
   v_post_id uuid;
   v_distribution_item_id uuid;
   v_second_distribution_item_id uuid;
+  v_third_distribution_item_id uuid;
   v_second_package_id uuid;
   v_other_package_id uuid := 'e7000000-0000-4000-8000-000000000001';
   v_other_variant_id uuid := 'e8000000-0000-4000-8000-000000000001';
@@ -33,6 +36,7 @@ declare
   v_request_id uuid := 'e6000000-0000-4000-8000-000000000001';
   v_assets_request_id uuid := 'e6000000-0000-4000-8000-000000000002';
   v_record_request_id uuid := 'e6000000-0000-4000-8000-000000000003';
+  v_second_record_request_id uuid := 'e6000000-0000-4000-8000-000000000005';
   v_skip_request_id uuid := 'e6000000-0000-4000-8000-000000000004';
   v_first_result jsonb;
 begin
@@ -48,6 +52,7 @@ begin
   insert into public.destinations(id, workspace_id, name, platform) values
     (v_destination_a, v_workspace_a, 'SFL Page', 'facebook_page'),
     (v_destination_a2, v_workspace_a, 'SFL Group', 'facebook_group'),
+    (v_destination_a3, v_workspace_a, 'Instagram', 'instagram_feed'),
     (v_destination_b, v_workspace_b, 'Other workspace', 'other');
   insert into public.content_opportunities(id, workspace_id, title, status, content_type) values
     (v_opportunity_a, v_workspace_a, 'Package opportunity A', 'ready', 'comparison'),
@@ -487,16 +492,35 @@ begin
     v_workspace_a, v_package_id, v_actor_a, 'website', null, v_package_updated_at,
     jsonb_build_array(
       jsonb_build_object('destination_id', v_destination_a, 'caption_variant_id', v_variant_id),
-      jsonb_build_object('destination_id', v_destination_a2, 'caption_variant_id', v_variant_id)
+      jsonb_build_object('destination_id', v_destination_a2, 'caption_variant_id', v_variant_id),
+      jsonb_build_object('destination_id', v_destination_a3, 'caption_variant_id', v_variant_id)
     )
   );
   v_package_updated_at := (v_package->>'updated_at')::timestamptz;
   select id into v_second_distribution_item_id
   from public.post_package_destinations
   where package_id = v_package_id and destination_id = v_destination_a2;
+  select id into v_third_distribution_item_id
+  from public.post_package_destinations
+  where package_id = v_package_id and destination_id = v_destination_a3;
   if (select status from public.post_package_destinations where package_id = v_package_id and destination_id = v_destination_a) <> 'published'
-    or (select status from public.post_package_destinations where package_id = v_package_id and destination_id = v_destination_a2) <> 'planned' then
+    or (select status from public.post_package_destinations where package_id = v_package_id and destination_id = v_destination_a2) <> 'planned'
+    or (select status from public.post_package_destinations where package_id = v_package_id and destination_id = v_destination_a3) <> 'planned' then
     raise exception 'Late destination addition did not preserve published distribution history';
+  end if;
+  select ctid into v_package_ctid from public.post_packages where id = v_package_id;
+
+  v_post := public.record_post_from_package(
+    v_workspace_a, v_package_id, v_second_distribution_item_id, v_actor_a,
+    'chatgpt_connector', v_second_record_request_id,
+    v_package_updated_at, now(), 'Second package publication'
+  );
+  if (select status from public.post_packages where id = v_package_id) <> 'publishing'
+    or (select updated_at from public.post_packages where id = v_package_id) <> v_package_updated_at
+    or (select ctid from public.post_packages where id = v_package_id) <> v_package_ctid
+    or (select count(*) from public.post_package_destinations where package_id = v_package_id and status = 'published') <> 2
+    or (select count(*) from public.post_package_destinations where package_id = v_package_id and id = v_second_distribution_item_id and post_id = (v_post->>'id')::uuid) <> 1 then
+    raise exception 'A later publication repeated the Draft to Publishing transition';
   end if;
 
   begin
@@ -519,7 +543,7 @@ begin
   end;
   begin
     perform public.skip_post_package_destination(
-      v_workspace_a, v_package_id, v_second_distribution_item_id, v_actor_a, 'website', null,
+      v_workspace_a, v_package_id, v_third_distribution_item_id, v_actor_a, 'website', null,
       v_package_updated_at - interval '1 second', 'Stale skip'
     );
     raise exception 'Stale destination skip was accepted';
@@ -527,13 +551,13 @@ begin
     if sqlerrm = 'Stale destination skip was accepted' then raise; end if;
   end;
   v_package := public.skip_post_package_destination(
-    v_workspace_a, v_package_id, v_second_distribution_item_id, v_actor_a,
+    v_workspace_a, v_package_id, v_third_distribution_item_id, v_actor_a,
     'development_tunnel', v_skip_request_id,
     v_package_updated_at, 'Not needed this cycle'
   );
   v_first_result := v_package;
   if public.skip_post_package_destination(
-    v_workspace_a, v_package_id, v_second_distribution_item_id, v_actor_a,
+    v_workspace_a, v_package_id, v_third_distribution_item_id, v_actor_a,
     'development_tunnel', v_skip_request_id,
     v_package_updated_at, 'Not needed this cycle'
   ) <> v_first_result then raise exception 'Skip retry was not idempotent'; end if;

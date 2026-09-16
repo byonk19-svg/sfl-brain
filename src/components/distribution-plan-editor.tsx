@@ -25,7 +25,7 @@ export function DistributionPlanEditor({ packageId, opportunityId, expectedUpdat
           <span className={`package-status status-${item.status}`}>{statusLabel(item.status)}</span>
           {item.status === "planned" && (
             <>
-              <p className="publication-pending">Publication recording will be available here once package publishing is connected.</p>
+              <Link className="button button-quiet" href={`/record-post?opportunity=${opportunityId}&distribution=${item.id}`}>Record publication</Link>
               <form action={skipDestination} className="skip-form">
                 <input type="hidden" name="package_id" value={packageId} />
                 <input type="hidden" name="opportunity_id" value={opportunityId} />

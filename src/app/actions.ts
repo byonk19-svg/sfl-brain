@@ -22,6 +22,7 @@ import {
   postPackageVariantSchema,
   radarEventSchema,
   recordPostSchema,
+  recordPostFromPackageWebsiteSchema,
   releaseOpportunityHoldSchema,
   setPostPackageAssetsSchema,
   setPostPackageDestinationsSchema,
@@ -439,28 +440,54 @@ export async function uploadOpportunityAssetAction(formData: FormData) {
 export async function recordPostAction(formData: FormData) {
   let destination = "/record-post";
   try {
-    const input = recordPostSchema.parse({
-      content_opportunity_id: formString(
-        formData,
-        "content_opportunity_id",
-      ),
-      destination_id: formString(formData, "destination_id"),
-      product_ids: formStrings(formData, "product_ids"),
-      asset_ids: formStrings(formData, "asset_ids"),
-      published_at: formString(formData, "published_at"),
-      caption: formString(formData, "caption"),
-      angle: formString(formData, "angle"),
-      performance_label: formString(formData, "performance_label") || "unknown",
-      notes: formString(formData, "notes"),
-    });
-    await (await createWebsiteBrainService()).recordPost(input);
-    revalidatePath("/today");
-    revalidatePath("/library");
-    for (const id of input.product_ids) revalidatePath(`/products/${id}`);
-    revalidatePath(`/opportunities/${input.content_opportunity_id}`);
-    destination = messageUrl("/today", "success", "Post recorded. Recommendations have been reranked.");
+    if (formString(formData, "distribution_item_id")) {
+      const input = recordPostFromPackageWebsiteSchema.parse({
+        opportunity_id: formString(formData, "content_opportunity_id"),
+        package_id: formString(formData, "package_id"),
+        distribution_item_id: formString(formData, "distribution_item_id"),
+        expected_updated_at: formString(formData, "expected_updated_at"),
+        published_at: formString(formData, "published_at"),
+        notes: formString(formData, "notes"),
+        caption_override: formData.has("caption") ? formData.get("caption") : undefined,
+        angle_override: formData.has("angle") ? formData.get("angle") : undefined,
+        destination_override: formData.has("destination_id") ? formData.get("destination_id") : undefined,
+        product_override_ids: formData.has("product_ids") ? formStrings(formData, "product_ids") : undefined,
+        asset_override_ids: formData.has("asset_ids") ? formStrings(formData, "asset_ids") : undefined,
+      });
+      destination = `/opportunities/${input.opportunity_id}`;
+      await (await createWebsiteBrainService()).recordPostFromPackage({
+        package_id: input.package_id,
+        distribution_item_id: input.distribution_item_id,
+        expected_updated_at: input.expected_updated_at,
+        published_at: input.published_at,
+        notes: input.notes,
+      });
+      revalidatePackageViews(destination);
+      destination = messageUrl(destination, "success", "Publication recorded from the approved Post Package snapshot.");
+    } else {
+      const input = recordPostSchema.parse({
+        content_opportunity_id: formString(
+          formData,
+          "content_opportunity_id",
+        ),
+        destination_id: formString(formData, "destination_id"),
+        product_ids: formStrings(formData, "product_ids"),
+        asset_ids: formStrings(formData, "asset_ids"),
+        published_at: formString(formData, "published_at"),
+        caption: formString(formData, "caption"),
+        angle: formString(formData, "angle"),
+        performance_label: formString(formData, "performance_label") || "unknown",
+        notes: formString(formData, "notes"),
+      });
+      await (await createWebsiteBrainService()).recordPost(input);
+      revalidatePath("/today");
+      revalidatePath("/library");
+      for (const id of input.product_ids) revalidatePath(`/products/${id}`);
+      revalidatePath(`/opportunities/${input.content_opportunity_id}`);
+      destination = messageUrl("/today", "success", "Post recorded. Recommendations have been reranked.");
+    }
   } catch (error) {
-    destination = messageUrl("/record-post", "error", errorMessage(error));
+    destination = messageUrl(destination, "error", errorMessage(error));
   }
   redirect(destination);
 }

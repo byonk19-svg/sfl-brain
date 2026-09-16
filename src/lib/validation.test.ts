@@ -12,6 +12,7 @@ import {
   placeOpportunityHoldSchema,
   postPackageVariantSchema,
   recordPostFromPackageSchema,
+  recordPostFromPackageWebsiteSchema,
   releaseOpportunityHoldSchema,
   skipPostPackageDestinationSchema,
   updateDestinationSchema,
@@ -273,6 +274,30 @@ describe("post package validation", () => {
       expected_updated_at: updatedAt,
       published_at: "not-a-date",
     })).toMatchObject({ success: false });
+  });
+
+  it("rejects manual caption, destination, product, and asset overrides for package publications", () => {
+    const publication = {
+      opportunity_id: uuid(1),
+      package_id: uuid(2),
+      distribution_item_id: uuid(3),
+      expected_updated_at: updatedAt,
+      published_at: "2026-09-15T12:30",
+    };
+
+    expect(recordPostFromPackageWebsiteSchema.parse(publication)).toMatchObject({
+      package_id: uuid(2),
+      distribution_item_id: uuid(3),
+    });
+    for (const override of [
+      { caption_override: "Different copy" },
+      { destination_override: uuid(4) },
+      { product_override_ids: [uuid(5)] },
+      { asset_override_ids: [uuid(6)] },
+    ]) {
+      expect(() => recordPostFromPackageWebsiteSchema.parse({ ...publication, ...override }))
+        .toThrow(/approved caption, destination, products, and ordered assets/i);
+    }
   });
 
   it("validates destination creation and versioned updates", () => {

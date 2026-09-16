@@ -46,7 +46,7 @@ describe("PostPackageWorkspace", () => {
     expect(startPackage).toHaveBeenCalledOnce();
   });
 
-  it("copies approved copy, defers publication recording, and renders complete prior packages read-only", async () => {
+  it("copies approved copy, links planned publication recording, and renders complete prior packages read-only", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(
@@ -182,8 +182,10 @@ describe("PostPackageWorkspace", () => {
     expect(screen.getByRole("img", { name: "Room preview" })).toHaveAttribute("src", "https://example.test/signed-preview");
     expect(screen.getByLabelText("Role")).toHaveValue("hero");
     expect(screen.getByLabelText("Order")).toHaveValue(0);
-    expect(screen.queryByRole("link", { name: "Record publication" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Publication recording will be available here once package publishing is connected/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Record publication" })).toHaveAttribute(
+      "href",
+      `/record-post?opportunity=${emptyContext.opportunity_id}&distribution=60000000-0000-4000-8000-000000000001`,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Copy SFL Page caption" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Approved copy"));
     expect(screen.getByText("Previous exact copy")).toBeInTheDocument();

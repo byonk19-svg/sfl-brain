@@ -360,6 +360,28 @@ export const recordPostFromPackageSchema = z.object({
   notes: optionalText,
 });
 
+const packagePublicationOverrideMessage =
+  "Package publications use the approved caption, destination, products, and ordered assets from the package";
+
+export const recordPostFromPackageWebsiteSchema = recordPostFromPackageSchema.extend({
+  opportunity_id: z.uuid(),
+  caption_override: z.unknown().optional(),
+  angle_override: z.unknown().optional(),
+  destination_override: z.unknown().optional(),
+  product_override_ids: z.array(z.unknown()).optional(),
+  asset_override_ids: z.array(z.unknown()).optional(),
+}).superRefine((input, context) => {
+  if (
+    input.caption_override !== undefined
+    || input.angle_override !== undefined
+    || input.destination_override !== undefined
+    || input.product_override_ids !== undefined
+    || input.asset_override_ids !== undefined
+  ) {
+    context.addIssue({ code: "custom", message: packagePublicationOverrideMessage });
+  }
+});
+
 export const createDestinationSchema = z.object({
   name: z.string().trim().min(1).max(200),
   platform: z.preprocess(

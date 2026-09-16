@@ -237,6 +237,141 @@ integration("local Supabase integration", () => {
     }
   });
 
+  it("records an exact publication snapshot from an approved planned package destination", async () => {
+    const env = getServerEnv();
+    const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const workspaceId = env.SFL_WORKSPACE_ID;
+    const createdUser = await admin.auth.admin.createUser({
+      email: `package-publication-${crypto.randomUUID()}@example.test`,
+      email_confirm: true,
+    });
+    if (createdUser.error || !createdUser.data.user) throw new Error(createdUser.error?.message ?? "Publication actor was not created");
+    const actorId = createdUser.data.user.id;
+    const membership = await admin.from("workspace_members").insert({ workspace_id: workspaceId, user_id: actorId });
+    if (membership.error) throw new Error(membership.error.message);
+
+    let opportunityId: string | null = null;
+    try {
+      const brain = createBrainService(workspaceId, { userId: actorId, source: "website" });
+      opportunityId = await brain.createContentOpportunity({
+        title: `Package publication ${crypto.randomUUID()}`,
+        status: "ready",
+        content_type: "comparison",
+        media_format: "carousel",
+        notes: undefined,
+        next_action: "Publish approved package",
+        estimated_minutes_remaining: 5,
+        product_ids: [],
+        asset_ids: [],
+      });
+      const created = await brain.createPostPackage({
+        opportunity_id: opportunityId,
+        base_caption: "Publication base",
+        working_angle: "Exact snapshot angle",
+      });
+      let context = await brain.getPostPackageContext(opportunityId);
+      const draftVariant = await brain.upsertPostPackageVariant({
+        package_id: created.id,
+        expected_updated_at: context.active_package!.updated_at,
+        audience: "sfl_page",
+        body: "Approved exact publication copy",
+        status: "draft",
+      });
+      context = await brain.getPostPackageContext(opportunityId);
+      await brain.setPostPackageAssets({
+        package_id: created.id,
+        expected_updated_at: context.active_package!.updated_at,
+        assets: [{
+          asset_id: "60000000-0000-4000-8000-000000000007",
+          role: "hero",
+          position: 0,
+        }],
+      });
+      context = await brain.getPostPackageContext(opportunityId);
+      await brain.setPostPackageDestinations({
+        package_id: created.id,
+        expected_updated_at: context.active_package!.updated_at,
+        destinations: [{
+          destination_id: "20000000-0000-4000-8000-000000000001",
+          caption_variant_id: draftVariant.id,
+        }],
+      });
+      context = await brain.getPostPackageContext(opportunityId);
+      const distribution = context.active_package!.distribution_items[0]!;
+      await expect(brain.recordPostFromPackage({
+        package_id: created.id,
+        distribution_item_id: distribution.id,
+        expected_updated_at: context.active_package!.updated_at,
+        published_at: new Date().toISOString(),
+      })).rejects.toThrow(/approved planned package destination/i);
+
+      await brain.upsertPostPackageVariant({
+        package_id: created.id,
+        variant_id: draftVariant.id,
+        expected_updated_at: draftVariant.updated_at,
+        audience: "sfl_page",
+        body: "Approved exact publication copy",
+        status: "approved",
+      });
+      context = await brain.getPostPackageContext(opportunityId);
+      const published = await brain.recordPostFromPackage({
+        package_id: created.id,
+        distribution_item_id: distribution.id,
+        expected_updated_at: context.active_package!.updated_at,
+        published_at: new Date().toISOString(),
+        notes: "Website package publication",
+      });
+
+      const post = await admin.from("posts")
+        .select("id,caption,post_package_id,caption_variant_id,destination_id,content_opportunity_id")
+        .eq("id", published.id)
+        .single();
+      if (post.error) throw new Error(post.error.message);
+      const postAssets = await admin.from("post_assets")
+        .select("asset_id,position")
+        .eq("post_id", published.id)
+        .order("position");
+      if (postAssets.error) throw new Error(postAssets.error.message);
+      context = await brain.getPostPackageContext(opportunityId);
+      expect(post.data).toMatchObject({
+        caption: "Approved exact publication copy",
+        post_package_id: created.id,
+        caption_variant_id: draftVariant.id,
+        destination_id: "20000000-0000-4000-8000-000000000001",
+        content_opportunity_id: opportunityId,
+      });
+      expect(postAssets.data).toEqual([{
+        asset_id: "60000000-0000-4000-8000-000000000007",
+        position: 0,
+      }]);
+      expect(context.active_package).toMatchObject({
+        status: "publishing",
+        distribution_items: [expect.objectContaining({ id: distribution.id, status: "published", post_id: published.id })],
+      });
+      expect(await brain.getOpportunityContext(opportunityId)).toMatchObject({ status: "posted" });
+    } finally {
+      if (opportunityId) {
+        if (!/^[0-9a-f-]{36}$/i.test(opportunityId)) throw new Error("Unsafe publication cleanup identifier");
+        execFileSync("docker", [
+          "exec", "supabase_db_sfl-brain", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+          `set session_replication_role = replica;
+           delete from public.post_assets where post_id in (select id from public.posts where content_opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_products where post_id in (select id from public.posts where content_opportunity_id = '${opportunityId}'::uuid);
+           delete from public.posts where content_opportunity_id = '${opportunityId}'::uuid;
+           delete from public.post_package_destinations where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_package_assets where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_package_caption_variants where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_packages where opportunity_id = '${opportunityId}'::uuid;
+           delete from public.content_opportunities where id = '${opportunityId}'::uuid;`,
+        ], { stdio: "ignore" });
+      }
+      await admin.from("workspace_members").delete().eq("workspace_id", workspaceId).eq("user_id", actorId);
+      await admin.auth.admin.deleteUser(actorId);
+    }
+  });
+
   it("loads the seeded ranking and Library through the real repository", async () => {
     const brain = createBrainService();
 
