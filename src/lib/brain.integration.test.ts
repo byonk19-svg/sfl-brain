@@ -8,6 +8,58 @@ import { getServerEnv } from "@/lib/env";
 const integration = describe.runIf(process.env.SFL_INTEGRATION === "1");
 
 integration("local Supabase integration", () => {
+  it("authorizes destination management through workspace membership", async () => {
+    const env = getServerEnv();
+    const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const workspaceId = env.SFL_WORKSPACE_ID;
+    const createdUser = await admin.auth.admin.createUser({
+      email: `destination-${crypto.randomUUID()}@example.test`,
+      email_confirm: true,
+    });
+    if (createdUser.error || !createdUser.data.user) throw new Error(createdUser.error?.message ?? "Destination actor was not created");
+    const actorId = createdUser.data.user.id;
+    const membership = await admin.from("workspace_members").insert({ workspace_id: workspaceId, user_id: actorId });
+    if (membership.error) throw new Error(membership.error.message);
+    const intruder = await admin.auth.admin.createUser({ email: `destination-nonmember-${crypto.randomUUID()}@example.test`, email_confirm: true });
+    if (intruder.error || !intruder.data.user) throw new Error(intruder.error?.message ?? "Destination nonmember was not created");
+    let destinationId: string | null = null;
+
+    try {
+      await expect(createBrainService(workspaceId, { userId: intruder.data.user.id, source: "website" }).createDestination({
+        name: "Unauthorized destination",
+        platform: "other",
+        posting_identity: "Nonmember",
+        notes: undefined,
+        is_active: true,
+      })).rejects.toThrow(/not a member/i);
+      const brain = createBrainService(workspaceId, { userId: actorId, source: "website" });
+      const created = await brain.createDestination({
+        name: "Integration destination",
+        platform: "other",
+        posting_identity: "Integration actor",
+        notes: "Created through membership-authorized service",
+        is_active: true,
+      });
+      destinationId = created.id;
+      await brain.updateDestination({
+        id: destinationId,
+        name: "Integration destination updated",
+        platform: "other",
+        posting_identity: "Integration actor",
+        notes: undefined,
+        is_active: false,
+      });
+      expect(await brain.getDestinations()).toContainEqual(expect.objectContaining({ id: destinationId, is_active: false }));
+    } finally {
+      if (destinationId) await admin.from("destinations").delete().eq("id", destinationId);
+      await admin.from("workspace_members").delete().eq("workspace_id", workspaceId).eq("user_id", actorId);
+      await admin.auth.admin.deleteUser(actorId);
+      await admin.auth.admin.deleteUser(intruder.data.user.id);
+    }
+  });
+
   it("creates and edits a typed post package through the real service boundary", async () => {
     const env = getServerEnv();
     const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {

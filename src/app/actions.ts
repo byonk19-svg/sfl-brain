@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { createWebsiteBrainService } from "@/lib/website-auth";
 import {
   affiliateLinkSchema,
+  createDestinationSchema,
+  createPostPackageSchema,
   createOpportunitySchema,
   createProductSchema,
   editOpportunitySchema,
@@ -16,9 +18,16 @@ import {
   opportunityAssetSchema,
   opportunityProductSchema,
   placeOpportunityHoldSchema,
+  postPackageVariantSchema,
   radarEventSchema,
   recordPostSchema,
   releaseOpportunityHoldSchema,
+  setPostPackageAssetsSchema,
+  setPostPackageDestinationsSchema,
+  skipPostPackageDestinationSchema,
+  finishPostPackageSchema,
+  updateDestinationSchema,
+  updatePostPackageSchema,
   updateOpportunityHoldSchema,
 } from "@/lib/validation";
 
@@ -451,6 +460,229 @@ export async function recordPostAction(formData: FormData) {
     destination = messageUrl("/today", "success", "Post recorded. Recommendations have been reranked.");
   } catch (error) {
     destination = messageUrl("/record-post", "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+function packageOpportunityPath(formData: FormData) {
+  return `/opportunities/${formString(formData, "opportunity_id")}`;
+}
+
+function revalidatePackageViews(opportunityPath: string) {
+  revalidatePath(opportunityPath);
+  revalidatePath("/today");
+  revalidatePath("/library");
+  revalidatePath("/record-post");
+}
+
+export async function createPostPackageAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const input = createPostPackageSchema.parse({
+      opportunity_id: formString(formData, "opportunity_id"),
+      base_caption: formString(formData, "base_caption"),
+      working_angle: formString(formData, "working_angle"),
+      notes: formString(formData, "notes"),
+    });
+    await (await createWebsiteBrainService()).createPostPackage(input);
+    revalidatePackageViews(destination);
+    destination = messageUrl(destination, "success", "Post Package started.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function updatePostPackageAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const nullable = (key: string) => formString(formData, key).trim() || null;
+    const input = updatePostPackageSchema.parse({
+      package_id: formString(formData, "package_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      base_caption: nullable("base_caption"),
+      working_angle: nullable("working_angle"),
+      notes: nullable("notes"),
+    });
+    await (await createWebsiteBrainService()).updatePostPackage(input);
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Package context saved.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function upsertPostPackageVariantAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const input = postPackageVariantSchema.parse({
+      package_id: formString(formData, "package_id"),
+      variant_id: formString(formData, "variant_id") || undefined,
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      audience: formString(formData, "audience"),
+      destination_id: formString(formData, "destination_id") || undefined,
+      body: formString(formData, "body"),
+      status: formString(formData, "status") || "draft",
+    });
+    await (await createWebsiteBrainService()).upsertPostPackageVariant(input);
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", input.status === "approved" ? "Caption variant approved." : "Caption variant saved as draft.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+function packageAssetsFromForm(formData: FormData) {
+  return formStrings(formData, "asset_ids").map((assetId) => ({
+    asset_id: assetId,
+    role: formString(formData, `asset_role_${assetId}`) || "supporting",
+    position: Number(formString(formData, `asset_position_${assetId}`)),
+    note: formString(formData, `asset_note_${assetId}`),
+  }));
+}
+
+export async function setPostPackageAssetsAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const input = setPostPackageAssetsSchema.parse({
+      package_id: formString(formData, "package_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      assets: packageAssetsFromForm(formData),
+    });
+    await (await createWebsiteBrainService()).setPostPackageAssets(input);
+    revalidatePath(destination);
+    destination = messageUrl(destination, "success", "Package asset selection saved.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function uploadPostPackageAssetAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const opportunityId = editOpportunitySchema.shape.id.parse(formString(formData, "opportunity_id"));
+    const file = formData.get("file");
+    if (!(file instanceof File)) throw new Error("Choose a file to upload.");
+    const brain = await createWebsiteBrainService();
+    const assetId = await brain.uploadAsset({
+      opportunityId,
+      title: formString(formData, "title"),
+      source: formString(formData, "source") as "home" | "in_store" | "canva" | "web" | "other",
+      file,
+    });
+    const current = JSON.parse(formString(formData, "current_assets") || "[]") as unknown;
+    const input = setPostPackageAssetsSchema.parse({
+      package_id: formString(formData, "package_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      assets: [...(Array.isArray(current) ? current : []), { asset_id: assetId, role: "supporting", position: Array.isArray(current) ? current.length : 0 }],
+    });
+    await brain.setPostPackageAssets(input);
+    revalidatePackageViews(destination);
+    destination = messageUrl(destination, "success", "Private asset uploaded and attached to the package.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function setPostPackageDestinationsAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const items = formStrings(formData, "destination_ids").map((destinationId) => ({
+      destination_id: destinationId,
+      caption_variant_id: formString(formData, `caption_variant_${destinationId}`),
+    }));
+    const input = setPostPackageDestinationsSchema.parse({
+      package_id: formString(formData, "package_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      destinations: items,
+    });
+    await (await createWebsiteBrainService()).setPostPackageDestinations(input);
+    revalidatePath(destination);
+    revalidatePath("/record-post");
+    destination = messageUrl(destination, "success", "Distribution plan saved.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function skipPostPackageDestinationAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const input = skipPostPackageDestinationSchema.parse({
+      package_id: formString(formData, "package_id"),
+      distribution_item_id: formString(formData, "distribution_item_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      skip_reason: formString(formData, "skip_reason"),
+    });
+    await (await createWebsiteBrainService()).skipPostPackageDestination(input);
+    revalidatePath(destination);
+    revalidatePath("/record-post");
+    destination = messageUrl(destination, "success", "Destination marked skipped.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function finishPostPackageAction(formData: FormData) {
+  let destination = packageOpportunityPath(formData);
+  try {
+    const input = finishPostPackageSchema.parse({
+      package_id: formString(formData, "package_id"),
+      expected_updated_at: formString(formData, "expected_updated_at"),
+      outcome: formString(formData, "outcome"),
+    });
+    await (await createWebsiteBrainService()).finishPostPackage(input);
+    revalidatePackageViews(destination);
+    destination = messageUrl(destination, "success", input.outcome === "closed" ? "Post Package closed." : "Post Package abandoned.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function createDestinationAction(formData: FormData) {
+  let destination = "/destinations";
+  try {
+    const input = createDestinationSchema.parse({
+      name: formString(formData, "name"),
+      platform: formString(formData, "platform"),
+      posting_identity: formString(formData, "posting_identity"),
+      notes: formString(formData, "notes"),
+      is_active: true,
+    });
+    await (await createWebsiteBrainService()).createDestination(input);
+    revalidatePath("/destinations");
+    revalidatePath("/record-post");
+    destination = messageUrl(destination, "success", "Destination added.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
+  }
+  redirect(destination);
+}
+
+export async function updateDestinationAction(formData: FormData) {
+  let destination = "/destinations";
+  try {
+    const input = updateDestinationSchema.parse({
+      id: formString(formData, "id"),
+      name: formString(formData, "name"),
+      platform: formString(formData, "platform"),
+      posting_identity: formString(formData, "posting_identity"),
+      notes: formString(formData, "notes"),
+      is_active: formString(formData, "is_active") === "true",
+    });
+    await (await createWebsiteBrainService()).updateDestination(input);
+    revalidatePath("/destinations");
+    revalidatePath("/record-post");
+    destination = messageUrl(destination, "success", input.is_active ? "Destination updated." : "Destination deactivated.");
+  } catch (error) {
+    destination = messageUrl(destination, "error", errorMessage(error));
   }
   redirect(destination);
 }

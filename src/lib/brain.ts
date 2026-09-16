@@ -18,6 +18,7 @@ import {
 import type {
   affiliateLinkSchema,
   createPostPackageSchema,
+  createDestinationSchema,
   createOpportunitySchema,
   createProductSchema,
   editOpportunitySchema,
@@ -34,10 +35,20 @@ import type {
   setPostPackageDestinationsSchema,
   skipPostPackageDestinationSchema,
   updatePostPackageSchema,
+  updateDestinationSchema,
 } from "@/lib/validation";
 import { validateUpload } from "@/lib/validation";
 
 type JsonRecord = Record<string, unknown>;
+export type DestinationRecord = {
+  id: string;
+  name: string;
+  platform: string;
+  posting_identity: string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+};
 
 export type MutationActor = {
   userId: string;
@@ -260,6 +271,58 @@ export class BrainService {
     return this.postPackageRepository().finish(input);
   }
 
+  private async requireMutationActorMembership() {
+    if (!this.mutationActor) throw new Error("Destination mutation actor is required.");
+    const membership = await this.client
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("workspace_id", this.workspaceId)
+      .eq("user_id", this.mutationActor.userId)
+      .maybeSingle();
+    if (membership.error || !membership.data) {
+      throw new Error("Destination mutation actor is not a member of this workspace.");
+    }
+  }
+
+  async getDestinations(): Promise<DestinationRecord[]> {
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .eq("workspace_id", this.workspaceId)
+        .order("is_active", { ascending: false })
+        .order("name"),
+      "Load destinations",
+    ) as unknown as DestinationRecord[];
+  }
+
+  async createDestination(input: z.infer<typeof createDestinationSchema>): Promise<DestinationRecord> {
+    await this.requireMutationActorMembership();
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .insert({ workspace_id: this.workspaceId, ...input })
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .single(),
+      "Create destination",
+    ) as unknown as DestinationRecord;
+  }
+
+  async updateDestination(input: z.infer<typeof updateDestinationSchema>): Promise<DestinationRecord> {
+    await this.requireMutationActorMembership();
+    const { id, ...replacement } = input;
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .update(replacement)
+        .eq("workspace_id", this.workspaceId)
+        .eq("id", id)
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .single(),
+      "Update destination",
+    ) as unknown as DestinationRecord;
+  }
+
   async searchLibrary(query = "", limit = 50): Promise<JsonRecord[]> {
     const normalized = query.trim().toLowerCase();
     const rows = await this.productGraph();
@@ -385,7 +448,7 @@ export class BrainService {
   async getFormOptions() {
     const [products, destinations, assets, opportunities] = await Promise.all([
       this.client.from("products").select("id,name").eq("workspace_id", this.workspaceId).eq("lifecycle_status", "active").order("name"),
-      this.client.from("destinations").select("id,name,platform").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
+      this.client.from("destinations").select("id,name,platform,posting_identity,notes,is_active").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
       this.client.from("assets").select("id,title,asset_type").eq("workspace_id", this.workspaceId).order("created_at", { ascending: false }),
       this.client.from("content_opportunities").select("id,title,status,content_type,content_opportunity_products(product_id),content_opportunity_assets(asset_id)").eq("workspace_id", this.workspaceId).is("archived_at", null).order("title"),
     ]);

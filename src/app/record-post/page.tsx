@@ -43,4 +43,4 @@ export default async function RecordPostPage({ searchParams }: { searchParams: S
   );
 }
 
-function Header() { return <header className="page-header"><div><span className="eyebrow">One idea, many destinations</span><h1>Record Post</h1><p>Each destination is one publication row. Reusing the same content opportunity keeps editorial variety accurate.</p></div></header>; }
+function Header() { return <header className="page-header"><div><span className="eyebrow">One idea, many destinations</span><h1>Record Post</h1><p>Each destination is one publication row. Reusing the same content opportunity keeps editorial variety accurate.</p></div><Link className="button button-quiet" href="/destinations">Manage destinations</Link></header>; }
