@@ -19,7 +19,11 @@ The final local gate ran against a fresh database reset on 2026-09-16:
 - Supabase CLI 2.116.0 database lint at warning level returned `No schema errors found`.
 - `local-post-package-acceptance.mjs` passed a real password-authenticated browser flow at desktop and 390px widths: package creation/editing, private asset upload and hero selection, draft-to-approved copy, two-destination plan, atomic package publication, skip, close, read-only archive retrieval, persisted snapshots, actor/source provenance, and terminal immutability.
 - `local-hosted-post-package-acceptance.mjs` passed through the real locally hosted/authenticated MCP route with a ten-minute local bearer token: tool inventory/annotations, initial read, all seven package writes, repeated-request idempotency, fresh-client reread, saved state, actor/source audit, and output sanitization.
-- Both acceptance programs removed only their validated UUID fixtures in `finally`. The website flow also removed its exact private Storage object. Final checks proved zero opportunities, packages, variants, package asset selections, distribution items, publications, assets, destinations, memberships, Auth users, and request-audit rows remained.
+- Five focused Node helper tests passed for single-source local Supabase configuration, mismatch refusal, trigger-scoped/FK-ordered cleanup SQL, explicit absence semantics, and occupied-port refusal.
+- Both acceptance programs derive the API URL, publishable/anonymous/service keys, JWT secret, and database endpoint from one `supabase status` result; they verify it against the configured URL/keys, `project_id`, Docker project/worktree labels, and mapped database port without logging secrets.
+- Server startup first proves the loopback port is unused, then requires the spawned child to remain alive, emit its ready marker, and return the expected SFL login or OAuth challenge. Startup failure and normal teardown terminate and await the exact process tree.
+- Both acceptance programs recover committed fixtures from their unique run marker before cleanup, even if an ID was not captured. Cleanup disables only the six terminal-immutability triggers inside one transaction, deletes exact recovered UUIDs in FK-safe order, restores every trigger, and never changes `session_replication_role`.
+- The website flow also recovers and removes every exact private Storage path before metadata deletion. Final marker-and-ID checks require explicit Auth `user_not_found` and Storage `NoSuchKey` results; connection, authorization, and other errors fail the proof. Zero opportunities, packages, variants, package asset selections, distribution items, publications, assets, destinations, memberships, Auth users, Storage objects, and request-audit rows remained.
 
 ## Security review
 
@@ -42,6 +46,7 @@ On a normal independent install, use the committed scripts:
 pnpm verify
 pnpm supabase:reset
 pnpm dlx supabase@2.116.0 db lint --local --level warning
+pnpm acceptance:test-support
 pnpm acceptance:post-package
 pnpm acceptance:mcp-post-package
 ```

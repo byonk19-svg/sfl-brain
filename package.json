@@ -17,6 +17,7 @@
     "acceptance:mcp-hold": "node scripts/local-hosted-hold-acceptance.mjs",
     "acceptance:post-package": "node scripts/local-post-package-acceptance.mjs",
     "acceptance:mcp-post-package": "node scripts/local-hosted-post-package-acceptance.mjs",
+    "acceptance:test-support": "node --test scripts/local-acceptance-support.test.mjs",
     "supabase:start": "pnpm dlx supabase@2.116.0 start",
     "supabase:stop": "pnpm dlx supabase@2.116.0 stop",
     "supabase:reset": "pnpm dlx supabase@2.116.0 db reset"

@@ -1,21 +1,28 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
-import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
 
 import { createClient } from "@supabase/supabase-js";
+import {
+  assertExplicitStorageMissing,
+  assertExplicitUserMissing,
+  assertLoopback,
+  buildCleanupSql,
+  executeCleanupSql,
+  loadLocalAcceptanceConfig,
+  startNextServer,
+  stopProcessTree,
+} from "./local-acceptance-support.mjs";
 
 const require = createRequire(import.meta.url);
 const projectDir = process.cwd();
-const env = { ...process.env, ...loadMainEnvironment(projectDir) };
+const local = loadLocalAcceptanceConfig(projectDir);
+const env = { ...process.env, ...local };
 const siteUrl = new URL(env.SFL_ACCEPTANCE_SITE_URL ?? "http://127.0.0.1:3104");
-const supabaseUrl = env.SUPABASE_URL;
-const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
-const publishableKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.SUPABASE_PUBLISHABLE_KEY;
-const workspaceId = env.SFL_WORKSPACE_ID;
+const supabaseUrl = local.supabaseUrl;
+const serviceRoleKey = local.serviceRoleKey;
+const publishableKey = local.publishableKey;
+const workspaceId = local.workspaceId;
 if (!supabaseUrl || !serviceRoleKey || !publishableKey || !workspaceId) {
   throw new Error("Local Post Package acceptance environment is incomplete");
 }
@@ -85,7 +92,8 @@ try {
       NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
     },
-    readyUrl: new URL("/login", siteUrl),
+    readyUrl: new URL(`/login?acceptance_server=${runId}`, siteUrl),
+    readyCheck: async (response) => response.status === 200 && (await response.text()).includes("Sign in to SFL Brain"),
   });
 
   browser = await chromium.launch({ headless: true });
@@ -273,43 +281,31 @@ try {
   console.log("Verified: desktop and narrow editing, approval, private asset selection, atomic publication, skip, close, archive retrieval, immutability");
 } finally {
   if (browser) await browser.close().catch((error) => cleanupErrors.push(error));
-  if (server) await stopServer(server).catch((error) => cleanupErrors.push(error));
-  if (assetStoragePath) {
-    const removed = await service.storage.from("sfl-assets").remove([assetStoragePath]);
-    if (removed.error) cleanupErrors.push(removed.error);
-  }
+  if (server) await stopProcessTree(server).catch((error) => cleanupErrors.push(error));
+  let fixtures = fallbackWebsiteFixtures();
   try {
-    cleanupDatabase({ opportunityId, packageId, assetId, destinationIds });
+    fixtures = await recoverWebsiteFixtures();
   } catch (error) {
     cleanupErrors.push(error);
   }
-  if (userId) {
-    const membership = await service.from("workspace_members").delete().eq("workspace_id", workspaceId).eq("user_id", userId);
+  for (const storagePath of fixtures.storagePaths) {
+    const removed = await service.storage.from("sfl-assets").remove([storagePath]);
+    if (removed.error) cleanupErrors.push(removed.error);
+  }
+  try {
+    executeCleanupSql(local, buildCleanupSql({ workspaceId, ...fixtures }));
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  for (const recoveredUserId of fixtures.actorUserIds) {
+    const membership = await service.from("workspace_members").delete().eq("workspace_id", workspaceId).eq("user_id", recoveredUserId);
     if (membership.error) cleanupErrors.push(membership.error);
-    const deleted = await service.auth.admin.deleteUser(userId);
+    const deleted = await service.auth.admin.deleteUser(recoveredUserId);
     if (deleted.error) cleanupErrors.push(deleted.error);
   }
-  await proveCleanup();
+  await proveCleanup(fixtures);
   if (cleanupErrors.length) throw new AggregateError(cleanupErrors, "Local Post Package acceptance cleanup failed");
   console.log("Disposable website Post Package data and private Storage object: removed");
-}
-
-function loadMainEnvironment(cwd) {
-  const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd, encoding: "utf8" }).trim();
-  const mainRoot = path.dirname(path.resolve(cwd, common));
-  const envPath = process.env.SFL_ACCEPTANCE_ENV_FILE ?? path.join(mainRoot, ".env.local");
-  if (!fs.existsSync(envPath)) throw new Error(`Acceptance environment file is missing: ${envPath}`);
-  const values = {};
-  for (const rawLine of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (!match) continue;
-    let value = match[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    values[match[1]] = value.replaceAll("\\n", "\n");
-  }
-  return values;
 }
 
 function loadPlaywright() {
@@ -319,10 +315,6 @@ function loadPlaywright() {
   } catch {
     throw new Error("CODEX_PLAYWRIGHT_PACKAGE must point to an installed Playwright package for browser acceptance");
   }
-}
-
-function assertLoopback(url, label) {
-  if (!["127.0.0.1", "localhost"].includes(url.hostname)) throw new Error(`Local acceptance refuses a non-loopback ${label} service`);
 }
 
 async function mustInsert(label, query) {
@@ -345,97 +337,88 @@ async function submitAndWait(page, button, notice) {
   await page.getByText(notice, { exact: true }).waitFor();
 }
 
-async function startNextServer({ projectDir: cwd, port, env: serverEnv, readyUrl }) {
-  const nextBin = path.join(cwd, "node_modules", "next", "dist", "bin", "next");
-  const child = spawn(process.execPath, [nextBin, "dev", "--webpack", "-H", "127.0.0.1", "-p", String(port)], {
-    cwd,
-    env: serverEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  let logs = "";
-  for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => { logs = `${logs}${chunk}`.slice(-12_000); });
-  for (let attempt = 0; attempt < 160; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Next server exited before acceptance:\n${logs}`);
-    try {
-      const response = await fetch(readyUrl, { redirect: "manual" });
-      if (response.status < 500) return child;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  child.kill();
-  throw new Error(`Next server did not become ready:\n${logs}`);
+function fallbackWebsiteFixtures() {
+  return {
+    opportunityIds: [opportunityId].filter(Boolean),
+    packageIds: [packageId].filter(Boolean),
+    assetIds: [assetId].filter(Boolean),
+    destinationIds: [...destinationIds],
+    requestIds: [],
+    actorUserIds: [userId].filter(Boolean),
+    storagePaths: [assetStoragePath].filter(Boolean),
+  };
 }
 
-async function stopServer(child) {
-  if (child.exitCode !== null) return;
-  child.kill();
-  await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (child.exitCode === null) child.kill("SIGKILL");
+async function recoverWebsiteFixtures() {
+  const fallback = fallbackWebsiteFixtures();
+  const opportunities = await rowsOrThrow("recover opportunity", service.from("content_opportunities").select("id").eq("workspace_id", workspaceId).eq("title", title));
+  const opportunityIds = union(fallback.opportunityIds, opportunities.map((row) => row.id));
+  const packages = opportunityIds.length
+    ? await rowsOrThrow("recover packages", service.from("post_packages").select("id").eq("workspace_id", workspaceId).in("opportunity_id", opportunityIds))
+    : [];
+  const assets = await rowsOrThrow("recover assets", service.from("assets").select("id,storage_path").eq("workspace_id", workspaceId).eq("title", assetTitle));
+  const destinations = await rowsOrThrow("recover destinations", service.from("destinations").select("id").eq("workspace_id", workspaceId).in("name", [destinationOneName, destinationTwoName]));
+  const recoveredUser = await findUserByEmail(email);
+  return {
+    opportunityIds,
+    packageIds: union(fallback.packageIds, packages.map((row) => row.id)),
+    assetIds: union(fallback.assetIds, assets.map((row) => row.id)),
+    destinationIds: union(fallback.destinationIds, destinations.map((row) => row.id)),
+    requestIds: [],
+    actorUserIds: union(fallback.actorUserIds, recoveredUser ? [recoveredUser.id] : []),
+    storagePaths: union(fallback.storagePaths, assets.map((row) => row.storage_path).filter(Boolean)),
+  };
 }
 
-function uuidOrNull(value) {
-  if (!value) return null;
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Refusing cleanup for a non-UUID identifier");
-  return value;
-}
-
-function cleanupDatabase(ids) {
-  const opportunity = uuidOrNull(ids.opportunityId);
-  const postPackage = uuidOrNull(ids.packageId);
-  const asset = uuidOrNull(ids.assetId);
-  const destinations = ids.destinationIds.map(uuidOrNull).filter(Boolean);
-  if (!opportunity && !postPackage && !asset && destinations.length === 0) return;
-  const quotedDestinations = destinations.map((id) => `'${id}'::uuid`).join(",") || "null";
-  const packageLiteral = postPackage ? `'${postPackage}'::uuid` : "null";
-  const opportunityLiteral = opportunity ? `'${opportunity}'::uuid` : "null";
-  const assetLiteral = asset ? `'${asset}'::uuid` : "null";
-  const sql = `
-begin;
-set local session_replication_role = replica;
-delete from public.post_package_destinations where package_id = ${packageLiteral};
-delete from public.post_assets where post_id in (select id from public.posts where post_package_id = ${packageLiteral});
-delete from public.posts where post_package_id = ${packageLiteral};
-delete from public.post_package_assets where package_id = ${packageLiteral};
-delete from public.post_package_caption_variants where package_id = ${packageLiteral};
-delete from public.post_packages where id = ${packageLiteral};
-delete from public.content_opportunity_assets where opportunity_id = ${opportunityLiteral};
-delete from public.content_opportunities where id = ${opportunityLiteral};
-delete from public.assets where id = ${assetLiteral};
-delete from public.destinations where id in (${quotedDestinations});
-commit;`;
-  const result = spawnSync("docker", ["exec", "-i", "supabase_db_sfl-brain", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
-    input: sql,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (result.status !== 0) throw new Error(`Exact fixture cleanup failed: ${result.stderr || result.stdout}`);
-}
-
-async function proveCleanup() {
+async function proveCleanup(fixtures) {
   const checks = [
-    ["opportunity", "content_opportunities", "id", opportunityId],
-    ["package", "post_packages", "id", packageId],
-    ["package variant", "post_package_caption_variants", "package_id", packageId],
-    ["package asset selection", "post_package_assets", "package_id", packageId],
-    ["package distribution item", "post_package_destinations", "package_id", packageId],
-    ["package publication", "posts", "post_package_id", packageId],
-    ["asset", "assets", "id", assetId],
-    ...destinationIds.map((id) => ["destination", "destinations", "id", id]),
+    ["opportunity ID", "content_opportunities", "id", fixtures.opportunityIds],
+    ["opportunity marker", "content_opportunities", "title", [title]],
+    ["package", "post_packages", "id", fixtures.packageIds],
+    ["package variant", "post_package_caption_variants", "package_id", fixtures.packageIds],
+    ["package asset selection", "post_package_assets", "package_id", fixtures.packageIds],
+    ["package distribution item", "post_package_destinations", "package_id", fixtures.packageIds],
+    ["package publication", "posts", "post_package_id", fixtures.packageIds],
+    ["asset ID", "assets", "id", fixtures.assetIds],
+    ["asset marker", "assets", "title", [assetTitle]],
+    ["destination ID", "destinations", "id", fixtures.destinationIds],
+    ["destination marker", "destinations", "name", [destinationOneName, destinationTwoName]],
   ];
-  for (const [label, table, column, value] of checks) {
-    if (!value) continue;
-    const result = await service.from(table).select(column, { count: "exact", head: true }).eq(column, value);
+  for (const [label, table, column, values] of checks) {
+    if (!values.length) continue;
+    const result = await service.from(table).select(column, { count: "exact", head: true }).in(column, values);
     if (result.error || result.count !== 0) cleanupErrors.push(result.error ?? new Error(`Disposable ${label} remained after cleanup`));
   }
-  if (userId) {
-    const membership = await service.from("workspace_members").select("user_id", { count: "exact", head: true }).eq("user_id", userId);
+  for (const recoveredUserId of fixtures.actorUserIds) {
+    const membership = await service.from("workspace_members").select("user_id", { count: "exact", head: true }).eq("user_id", recoveredUserId);
     if (membership.error || membership.count !== 0) cleanupErrors.push(membership.error ?? new Error("Disposable membership remained after cleanup"));
-    const deletedUser = await service.auth.admin.getUserById(userId);
-    if (!deletedUser.error && deletedUser.data.user) cleanupErrors.push(new Error("Disposable Auth user remained after cleanup"));
+    try { assertExplicitUserMissing(await service.auth.admin.getUserById(recoveredUserId)); } catch (error) { cleanupErrors.push(error); }
   }
-  if (assetStoragePath) {
-    const downloaded = await service.storage.from("sfl-assets").download(assetStoragePath);
-    if (!downloaded.error) cleanupErrors.push(new Error("Disposable private Storage object remained after cleanup"));
+  try {
+    if (await findUserByEmail(email)) cleanupErrors.push(new Error("Disposable Auth user marker remained after cleanup"));
+  } catch (error) { cleanupErrors.push(error); }
+  for (const storagePath of fixtures.storagePaths) {
+    try { assertExplicitStorageMissing(await service.storage.from("sfl-assets").download(storagePath)); } catch (error) { cleanupErrors.push(error); }
   }
+}
+
+async function rowsOrThrow(label, query) {
+  const { data, error } = await query;
+  if (error) throw new Error(`${label}: ${error.message}`);
+  return data ?? [];
+}
+
+async function findUserByEmail(targetEmail) {
+  for (let page = 1; page <= 20; page += 1) {
+    const result = await service.auth.admin.listUsers({ page, perPage: 100 });
+    if (result.error) throw new Error(`Recover Auth user: ${result.error.message}`);
+    const found = result.data.users.find((user) => user.email === targetEmail);
+    if (found) return found;
+    if (result.data.users.length < 100) return null;
+  }
+  throw new Error("Recover Auth user exceeded the bounded local user scan");
+}
+
+function union(...collections) {
+  return [...new Set(collections.flat().filter(Boolean))];
 }
