@@ -126,7 +126,19 @@ alter table public.posts
   add foreign key (caption_variant_id, post_package_id, workspace_id)
     references public.post_package_caption_variants(id, package_id, workspace_id) on delete restrict,
   add constraint posts_caption_variant_requires_package
-    check (caption_variant_id is null or post_package_id is not null);
+    check (caption_variant_id is null or post_package_id is not null),
+  add constraint posts_package_publication_identity
+    unique (id, workspace_id, post_package_id, destination_id, caption_variant_id);
+
+alter table public.post_package_destinations
+  add constraint post_package_destinations_publication_identity_fkey
+  foreign key (post_id, workspace_id, package_id, destination_id, caption_variant_id)
+  references public.posts(
+    id, workspace_id, post_package_id, destination_id, caption_variant_id
+  ) on delete restrict;
+
+create unique index one_distribution_item_per_post
+  on public.post_package_destinations(post_id) where post_id is not null;
 
 create index posts_post_package_idx on public.posts(post_package_id)
   where post_package_id is not null;
@@ -225,6 +237,9 @@ declare
 begin
   if p_source not in ('website', 'chatgpt_connector', 'development_tunnel') then
     raise exception 'Unsupported post package mutation source';
+  end if;
+  if p_source = 'website' and p_request_id is not null then
+    raise exception 'Website post package request ID must be null';
   end if;
   if p_source in ('chatgpt_connector', 'development_tunnel') and p_request_id is null then
     raise exception 'Connector post package request ID is required';

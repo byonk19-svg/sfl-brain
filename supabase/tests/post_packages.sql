@@ -11,6 +11,7 @@ declare
   v_destination_b uuid := 'e3000000-0000-4000-8000-000000000003';
   v_opportunity_a uuid := 'e4000000-0000-4000-8000-000000000001';
   v_opportunity_b uuid := 'e4000000-0000-4000-8000-000000000002';
+  v_opportunity_a2 uuid := 'e4000000-0000-4000-8000-000000000003';
   v_asset_a uuid := 'e5000000-0000-4000-8000-000000000001';
   v_asset_a2 uuid := 'e5000000-0000-4000-8000-000000000002';
   v_asset_b uuid := 'e5000000-0000-4000-8000-000000000003';
@@ -26,6 +27,9 @@ declare
   v_distribution_item_id uuid;
   v_second_distribution_item_id uuid;
   v_second_package_id uuid;
+  v_other_package_id uuid := 'e7000000-0000-4000-8000-000000000001';
+  v_other_variant_id uuid := 'e8000000-0000-4000-8000-000000000001';
+  v_alt_variant_id uuid := 'e8000000-0000-4000-8000-000000000002';
   v_request_id uuid := 'e6000000-0000-4000-8000-000000000001';
   v_assets_request_id uuid := 'e6000000-0000-4000-8000-000000000002';
   v_record_request_id uuid := 'e6000000-0000-4000-8000-000000000003';
@@ -47,7 +51,8 @@ begin
     (v_destination_b, v_workspace_b, 'Other workspace', 'other');
   insert into public.content_opportunities(id, workspace_id, title, status, content_type) values
     (v_opportunity_a, v_workspace_a, 'Package opportunity A', 'ready', 'comparison'),
-    (v_opportunity_b, v_workspace_b, 'Package opportunity B', 'ready', 'comparison');
+    (v_opportunity_b, v_workspace_b, 'Package opportunity B', 'ready', 'comparison'),
+    (v_opportunity_a2, v_workspace_a, 'Package opportunity A2', 'ready', 'comparison');
   insert into public.assets(id, workspace_id, title, asset_type, source) values
     (v_asset_a, v_workspace_a, 'Hero', 'photo', 'home'),
     (v_asset_a2, v_workspace_a, 'Supporting', 'canva_graphic', 'canva'),
@@ -118,6 +123,19 @@ begin
     raise exception 'Cross-workspace actor created a package';
   exception when others then
     if sqlerrm = 'Cross-workspace actor created a package' then raise; end if;
+  end;
+  begin
+    perform public.update_post_package(
+      v_workspace_a, v_package_id, v_actor_a, 'website',
+      'e6000000-0000-4000-8000-000000000006', v_package_updated_at,
+      'Website request ID must fail', null, null
+    );
+    raise exception 'Website request ID was accepted';
+  exception when others then
+    if sqlerrm = 'Website request ID was accepted' then raise; end if;
+    if sqlerrm <> 'Website post package request ID must be null' then
+      raise exception 'Website request ID used the wrong failure contract: %', sqlerrm;
+    end if;
   end;
 
   begin
@@ -411,6 +429,59 @@ begin
     ))) = 0 then
     raise exception 'Publication serialization did not preserve exactly one Post';
   end if;
+  insert into public.post_packages(
+    id, workspace_id, opportunity_id, sequence, base_caption,
+    created_by, updated_by, created_source, updated_source
+  ) values (
+    v_other_package_id, v_workspace_a, v_opportunity_a2, 1, 'Other package',
+    v_actor_a, v_actor_a, 'website', 'website'
+  );
+  insert into public.post_package_caption_variants(
+    id, workspace_id, package_id, audience, body, status,
+    created_by, updated_by, created_source, updated_source
+  ) values
+    (v_other_variant_id, v_workspace_a, v_other_package_id, 'custom', 'Other package copy', 'draft',
+      v_actor_a, v_actor_a, 'website', 'website'),
+    (v_alt_variant_id, v_workspace_a, v_package_id, 'instagram', 'Alternate copy', 'draft',
+      v_actor_a, v_actor_a, 'website', 'website');
+  begin
+    update public.post_package_destinations
+    set package_id = v_other_package_id, caption_variant_id = v_other_variant_id
+    where id = v_distribution_item_id;
+    raise exception 'Published distribution accepted a Post from another package';
+  exception when others then
+    if sqlerrm = 'Published distribution accepted a Post from another package' then raise; end if;
+  end;
+  begin
+    update public.post_package_destinations
+    set destination_id = v_destination_a2 where id = v_distribution_item_id;
+    raise exception 'Published distribution accepted a Post for another destination';
+  exception when others then
+    if sqlerrm = 'Published distribution accepted a Post for another destination' then raise; end if;
+  end;
+  begin
+    update public.post_package_destinations
+    set caption_variant_id = v_alt_variant_id where id = v_distribution_item_id;
+    raise exception 'Published distribution accepted a Post with another caption variant';
+  exception when others then
+    if sqlerrm = 'Published distribution accepted a Post with another caption variant' then raise; end if;
+  end;
+  begin
+    insert into public.post_package_destinations(
+      workspace_id, package_id, destination_id, caption_variant_id, status, post_id
+    ) values (
+      v_workspace_a, v_package_id, v_destination_a, v_variant_id, 'published', v_post_id
+    );
+    raise exception 'A Post was referenced by multiple distribution items';
+  exception when others then
+    if sqlerrm = 'A Post was referenced by multiple distribution items' then raise; end if;
+  end;
+  if not exists (
+    select 1 from pg_indexes
+    where schemaname = 'public' and tablename = 'post_package_destinations'
+      and indexname = 'one_distribution_item_per_post'
+      and indexdef ilike 'create unique index%'
+  ) then raise exception 'Distribution Post uniqueness is not enforced'; end if;
 
   v_package := public.set_post_package_destinations(
     v_workspace_a, v_package_id, v_actor_a, 'website', null, v_package_updated_at,
