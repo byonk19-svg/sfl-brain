@@ -147,6 +147,32 @@ function failure(error: unknown) {
   };
 }
 
+function packageMutationFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unexpected SFL Brain error";
+  return {
+    isError: true,
+    content: [{
+      type: "text" as const,
+      text: `SFL Brain did not save the requested Post Package change. No change was confirmed. ${message}`,
+    }],
+  };
+}
+
+function packageVerificationFailure(requestId: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "Unexpected SFL Brain error";
+  return {
+    isError: true,
+    content: [{
+      type: "text" as const,
+      text: `SFL Brain completed the Post Package write, but the required fresh read failed. The change may have saved. Retry the same action with the SAME request_id (${requestId}), then run get_post_package_context for a fresh read before making another change. Verification error: ${message}`,
+    }],
+    structuredContent: {
+      mutation_status: "saved_but_unverified",
+      request_id: requestId,
+    },
+  };
+}
+
 export function createSflMcpServer(
   reader: BrainReader,
   options: {
@@ -160,7 +186,7 @@ export function createSflMcpServer(
     { name: "sfl-brain", version: "0.2.1" },
     {
       instructions:
-        "Read-only facts and deterministic recommendations for Styled For Less. Use these tools to ground editorial judgment; never imply that the Brain publishes or monitors retailers.",
+        "Reads and explicit, confirmed, audited workspace writes for Styled For Less. Use these tools to ground editorial judgment. SFL Brain never publishes externally and never monitors retailers.",
     },
   );
 
@@ -278,17 +304,41 @@ export function createSflMcpServer(
       }
       return sanitizePostPackage(context, options.trustedStorageOrigin);
     };
+    const runPackageWrite = async <T>(options: {
+      requestId: string;
+      mutate: () => Promise<T>;
+      packageId: (saved: T) => string;
+      summary: string;
+    }) => {
+      let saved: T;
+      try {
+        saved = await options.mutate();
+      } catch (error) {
+        return packageMutationFailure(error);
+      }
+      try {
+        return success(
+          "post_package_context",
+          await rereadPackage(options.packageId(saved)),
+          options.summary,
+        );
+      } catch (error) {
+        return packageVerificationFailure(options.requestId, error);
+      }
+    };
     server.registerTool("create_post_package", {
       title: "Start Post Package",
       description: "Start a Post Package only after an explicit workspace-member request and a fresh get_post_package_context read confirms there is no active package.",
       inputSchema: createPostPackageToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.createPostPackage) return unavailable("Create Post Package");
-        const saved = await reader.createPostPackage(args);
-        return success("post_package_context", await rereadPackage(saved.id), "Post Package started and re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.createPostPackage) return packageMutationFailure(new Error("Create Post Package is not configured"));
+      return runPackageWrite({
+        requestId: args.request_id,
+        mutate: () => reader.createPostPackage!(args),
+        packageId: (saved) => saved.id,
+        summary: "Post Package started and re-read.",
+      });
     });
     server.registerTool("update_post_package", {
       title: "Update Post Package",
@@ -296,11 +346,8 @@ export function createSflMcpServer(
       inputSchema: updatePostPackageToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.updatePostPackage) return unavailable("Update Post Package");
-        await reader.updatePostPackage(args);
-        return success("post_package_context", await rereadPackage(args.package_id), "Post Package updated and re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.updatePostPackage) return packageMutationFailure(new Error("Update Post Package is not configured"));
+      return runPackageWrite({ requestId: args.request_id, mutate: () => reader.updatePostPackage!(args), packageId: () => args.package_id, summary: "Post Package updated and re-read." });
     });
     server.registerTool("upsert_post_package_caption_variant", {
       title: "Save Post Package Caption Variant",
@@ -308,11 +355,8 @@ export function createSflMcpServer(
       inputSchema: upsertPostPackageCaptionVariantToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.upsertPostPackageVariant) return unavailable("Save Post Package caption variant");
-        await reader.upsertPostPackageVariant(args);
-        return success("post_package_context", await rereadPackage(args.package_id), "Caption variant saved and package re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.upsertPostPackageVariant) return packageMutationFailure(new Error("Save Post Package caption variant is not configured"));
+      return runPackageWrite({ requestId: args.request_id, mutate: () => reader.upsertPostPackageVariant!(args), packageId: () => args.package_id, summary: "Caption variant saved and package re-read." });
     });
     server.registerTool("set_post_package_assets", {
       title: "Set Post Package Assets",
@@ -320,11 +364,8 @@ export function createSflMcpServer(
       inputSchema: setPostPackageAssetsToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.setPostPackageAssets) return unavailable("Set Post Package assets");
-        await reader.setPostPackageAssets(args);
-        return success("post_package_context", await rereadPackage(args.package_id), "Package assets saved and package re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.setPostPackageAssets) return packageMutationFailure(new Error("Set Post Package assets is not configured"));
+      return runPackageWrite({ requestId: args.request_id, mutate: () => reader.setPostPackageAssets!(args), packageId: () => args.package_id, summary: "Package assets saved and package re-read." });
     });
     server.registerTool("set_post_package_destinations", {
       title: "Set Post Package Destinations",
@@ -332,11 +373,8 @@ export function createSflMcpServer(
       inputSchema: setPostPackageDestinationsToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.setPostPackageDestinations) return unavailable("Set Post Package destinations");
-        await reader.setPostPackageDestinations(args);
-        return success("post_package_context", await rereadPackage(args.package_id), "Distribution plan saved and package re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.setPostPackageDestinations) return packageMutationFailure(new Error("Set Post Package destinations is not configured"));
+      return runPackageWrite({ requestId: args.request_id, mutate: () => reader.setPostPackageDestinations!(args), packageId: () => args.package_id, summary: "Distribution plan saved and package re-read." });
     });
     server.registerTool("skip_post_package_destination", {
       title: "Skip Post Package Destination",
@@ -344,11 +382,8 @@ export function createSflMcpServer(
       inputSchema: skipPostPackageDestinationToolSchema,
       annotations: developmentWriteAnnotations,
     }, async (args) => {
-      try {
-        if (!reader.skipPostPackageDestination) return unavailable("Skip Post Package destination");
-        await reader.skipPostPackageDestination(args);
-        return success("post_package_context", await rereadPackage(args.package_id), "Destination skipped and package re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.skipPostPackageDestination) return packageMutationFailure(new Error("Skip Post Package destination is not configured"));
+      return runPackageWrite({ requestId: args.request_id, mutate: () => reader.skipPostPackageDestination!(args), packageId: () => args.package_id, summary: "Destination skipped and package re-read." });
     });
     server.registerTool("finish_post_package", {
       title: "Finish Post Package",
@@ -356,11 +391,13 @@ export function createSflMcpServer(
       inputSchema: finishPostPackageToolSchema,
       annotations: developmentWriteAnnotations,
     }, async ({ action, ...args }) => {
-      try {
-        if (!reader.finishPostPackage) return unavailable("Finish Post Package");
-        await reader.finishPostPackage({ ...args, outcome: action === "close" ? "closed" : "abandoned" });
-        return success("post_package_context", await rereadPackage(args.package_id), "Post Package finished and re-read.");
-      } catch (error) { return failure(error); }
+      if (!reader.finishPostPackage) return packageMutationFailure(new Error("Finish Post Package is not configured"));
+      return runPackageWrite({
+        requestId: args.request_id,
+        mutate: () => reader.finishPostPackage!({ ...args, outcome: action === "close" ? "closed" : "abandoned" }),
+        packageId: () => args.package_id,
+        summary: "Post Package finished and re-read.",
+      });
     });
   }
 

@@ -70,6 +70,9 @@ describe("SFL Brain MCP server", () => {
     for (const tool of listed.tools) {
       expect(tool.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
     }
+    expect(client.getInstructions()).toMatch(/reads and explicit, confirmed, audited workspace writes/i);
+    expect(client.getInstructions()).toMatch(/never publishes externally/i);
+    expect(client.getInstructions()).toMatch(/never monitors retailers/i);
   });
 
   it("keeps Post Package writes out of legacy local pilot-write mode", async () => {
@@ -158,6 +161,8 @@ describe("SFL Brain MCP server", () => {
     const opportunityId = candidate.opportunity_id;
     const packageId = "a0000000-0000-4000-8000-000000000003";
     let includeSavedPackage = true;
+    let mutationFails = false;
+    let rereadFails = false;
     const reader: BrainReader = {
       getTodayCandidates: async () => [],
       searchContentBacklog: async () => [],
@@ -167,6 +172,7 @@ describe("SFL Brain MCP server", () => {
       getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
       getPostPackageContextByPackage: async (id) => {
         calls.push(`read-package:${id}`);
+        if (rereadFails) throw new Error("Temporary read outage");
         return {
           opportunity_id: opportunityId,
           active_package: includeSavedPackage ? {
@@ -188,6 +194,7 @@ describe("SFL Brain MCP server", () => {
       getRevivalEvents: async () => [],
       createPostPackage: async () => {
         calls.push("write");
+        if (mutationFails) throw new Error("Stale package version");
         return { id: packageId, opportunity_id: opportunityId } as never;
       },
     };
@@ -230,18 +237,44 @@ describe("SFL Brain MCP server", () => {
         },
       });
 
-      includeSavedPackage = false;
-      const unverified = await hostedClient.callTool({
+      mutationFails = true;
+      const rejected = await hostedClient.callTool({
         name: "create_post_package",
         arguments: {
           request_id: "a0000000-0000-4000-8000-000000000002",
           opportunity_id: opportunityId,
         },
       });
-      expect(unverified.isError).toBe(true);
-      expect(unverified.content).toEqual(expect.arrayContaining([
-        expect.objectContaining({ text: expect.stringMatching(/could not be verified/i) }),
+      expect(rejected.isError).toBe(true);
+      expect(rejected.content).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringMatching(/did not save[\s\S]*no change was confirmed/i) }),
       ]));
+
+      mutationFails = false;
+      rereadFails = true;
+      const committedButUnverified = await hostedClient.callTool({
+        name: "create_post_package",
+        arguments: {
+          request_id: "a0000000-0000-4000-8000-000000000003",
+          opportunity_id: opportunityId,
+        },
+      });
+      expect(committedButUnverified.isError).toBe(true);
+      expect(committedButUnverified.content).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringMatching(/may have saved[\s\S]*same request_id[\s\S]*fresh read/i) }),
+      ]));
+
+      rereadFails = false;
+      includeSavedPackage = false;
+      const missingFromFreshContext = await hostedClient.callTool({
+        name: "create_post_package",
+        arguments: {
+          request_id: "a0000000-0000-4000-8000-000000000004",
+          opportunity_id: opportunityId,
+        },
+      });
+      expect(missingFromFreshContext.isError).toBe(true);
+      expect(JSON.stringify(missingFromFreshContext.content)).toMatch(/may have saved/i);
     } finally {
       await hostedClient.close();
       await hostedServer.close();
