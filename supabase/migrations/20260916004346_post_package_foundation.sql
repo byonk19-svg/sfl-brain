@@ -90,6 +90,7 @@ create unique index one_hero_per_post_package
   on public.post_package_assets(package_id) where role = 'hero';
 
 create table public.post_package_destinations (
+  id uuid primary key default extensions.gen_random_uuid(),
   workspace_id uuid not null,
   package_id uuid not null,
   destination_id uuid not null,
@@ -99,7 +100,9 @@ create table public.post_package_destinations (
   skip_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (package_id, destination_id),
+  unique (id, workspace_id),
+  unique (id, package_id, workspace_id),
+  unique (package_id, destination_id),
   foreign key (package_id, workspace_id)
     references public.post_packages(id, workspace_id) on delete cascade,
   foreign key (destination_id, workspace_id)
@@ -121,7 +124,9 @@ alter table public.posts
   add foreign key (post_package_id, workspace_id)
     references public.post_packages(id, workspace_id) on delete restrict,
   add foreign key (caption_variant_id, post_package_id, workspace_id)
-    references public.post_package_caption_variants(id, package_id, workspace_id) on delete restrict;
+    references public.post_package_caption_variants(id, package_id, workspace_id) on delete restrict,
+  add constraint posts_caption_variant_requires_package
+    check (caption_variant_id is null or post_package_id is not null);
 
 create index posts_post_package_idx on public.posts(post_package_id)
   where post_package_id is not null;
@@ -221,7 +226,7 @@ begin
   if p_source not in ('website', 'chatgpt_connector', 'development_tunnel') then
     raise exception 'Unsupported post package mutation source';
   end if;
-  if p_source = 'chatgpt_connector' and p_request_id is null then
+  if p_source in ('chatgpt_connector', 'development_tunnel') and p_request_id is null then
     raise exception 'Connector post package request ID is required';
   end if;
   if p_source in ('website', 'chatgpt_connector') and (
@@ -387,6 +392,7 @@ declare
   v_result jsonb;
   v_body text;
   v_old_body text;
+  v_package_base_caption text;
   v_effective_status public.caption_variant_status;
 begin
   v_result := public.begin_post_package_mutation(
@@ -395,15 +401,19 @@ begin
   if v_result is not null then return v_result; end if;
   if p_audience not in ('sfl_page', 'sfl_groups', 'personal_groups', 'instagram', 'custom')
     or p_status not in ('draft', 'approved') then raise exception 'Invalid caption variant value'; end if;
+  select base_caption into v_package_base_caption
+  from public.post_packages
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing')
+  for update;
+  if not found then raise exception 'Post package is unavailable'; end if;
   if p_destination_id is not null and not exists (
     select 1 from public.destinations
     where id = p_destination_id and workspace_id = p_workspace_id and is_active
   ) then raise exception 'Destination override is unavailable'; end if;
 
   if p_variant_id is null then
-    select coalesce(nullif(trim(p_body), ''), nullif(trim(base_caption), ''))
-      into v_body from public.post_packages
-    where id = p_package_id and workspace_id = p_workspace_id and status in ('draft', 'publishing');
+    v_body := coalesce(nullif(trim(p_body), ''), nullif(trim(v_package_base_caption), ''));
     if v_body is null then raise exception 'Caption variant body is required'; end if;
     v_effective_status := p_status::public.caption_variant_status;
     insert into public.post_package_caption_variants(
@@ -419,7 +429,8 @@ begin
   else
     select body into v_old_body from public.post_package_caption_variants
     where id = p_variant_id and package_id = p_package_id and workspace_id = p_workspace_id
-      and updated_at = p_expected_updated_at;
+      and updated_at = p_expected_updated_at
+    for update;
     if not found then raise exception 'Caption variant changed since it was last read'; end if;
     v_body := nullif(trim(p_body), '');
     if v_body is null then raise exception 'Caption variant body is required'; end if;
@@ -467,10 +478,11 @@ begin
   );
   if v_result is not null then return v_result; end if;
   if jsonb_typeof(coalesce(p_assets, '[]'::jsonb)) <> 'array' then raise exception 'Assets must be an array'; end if;
-  if not exists (
-    select 1 from public.post_packages where id = p_package_id and workspace_id = p_workspace_id
-      and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
-  ) then raise exception 'Post package changed since it was last read'; end if;
+  perform 1 from public.post_packages
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
+  for update;
+  if not found then raise exception 'Post package changed since it was last read'; end if;
   if exists (
     select 1 from jsonb_array_elements(coalesce(p_assets, '[]'::jsonb)) item
     left join public.assets a on a.id = (item->>'asset_id')::uuid and a.workspace_id = p_workspace_id
@@ -520,10 +532,11 @@ begin
   );
   if v_result is not null then return v_result; end if;
   if jsonb_typeof(coalesce(p_destinations, '[]'::jsonb)) <> 'array' then raise exception 'Destinations must be an array'; end if;
-  if not exists (
-    select 1 from public.post_packages where id = p_package_id and workspace_id = p_workspace_id
-      and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
-  ) then raise exception 'Post package changed since it was last read'; end if;
+  perform 1 from public.post_packages
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
+  for update;
+  if not found then raise exception 'Post package changed since it was last read'; end if;
   if exists (
     select 1 from jsonb_array_elements(coalesce(p_destinations, '[]'::jsonb)) item
     left join public.destinations d
@@ -551,15 +564,24 @@ begin
           and (item->>'caption_variant_id')::uuid = existing.caption_variant_id
       )
   ) then raise exception 'Published or skipped destinations must be preserved unchanged'; end if;
-  delete from public.post_package_destinations
-  where package_id = p_package_id and status = 'planned';
+  delete from public.post_package_destinations existing
+  where existing.package_id = p_package_id
+    and existing.status = 'planned'
+    and not exists (
+      select 1
+      from jsonb_array_elements(coalesce(p_destinations, '[]'::jsonb)) item
+      where (item->>'destination_id')::uuid = existing.destination_id
+    );
   insert into public.post_package_destinations(
-    workspace_id, package_id, destination_id, caption_variant_id
+    id, workspace_id, package_id, destination_id, caption_variant_id
   )
-  select p_workspace_id, p_package_id, (item->>'destination_id')::uuid,
+  select coalesce((item->>'id')::uuid, extensions.gen_random_uuid()),
+    p_workspace_id, p_package_id, (item->>'destination_id')::uuid,
     (item->>'caption_variant_id')::uuid
   from jsonb_array_elements(coalesce(p_destinations, '[]'::jsonb)) item
-  on conflict (package_id, destination_id) do nothing;
+  on conflict (package_id, destination_id) do update
+    set caption_variant_id = excluded.caption_variant_id
+    where post_package_destinations.status = 'planned';
   update public.post_packages set updated_by = p_actor_user_id, updated_source = p_source
   where id = p_package_id returning to_jsonb(post_packages.*) into v_result;
   perform public.complete_post_package_mutation(
@@ -573,7 +595,7 @@ $$;
 create function public.skip_post_package_destination(
   p_workspace_id uuid,
   p_package_id uuid,
-  p_destination_id uuid,
+  p_distribution_item_id uuid,
   p_actor_user_id uuid,
   p_source text,
   p_request_id uuid,
@@ -583,7 +605,7 @@ create function public.skip_post_package_destination(
 returns jsonb language plpgsql set search_path = '' as $$
 declare
   v_payload jsonb := jsonb_build_object(
-    'package_id', p_package_id, 'destination_id', p_destination_id,
+    'package_id', p_package_id, 'distribution_item_id', p_distribution_item_id,
     'expected_updated_at', p_expected_updated_at, 'skip_reason', nullif(trim(p_skip_reason), '')
   );
   v_result jsonb;
@@ -592,14 +614,15 @@ begin
     p_workspace_id, 'skip_post_package_destination', p_actor_user_id, p_source, p_request_id, v_payload
   );
   if v_result is not null then return v_result; end if;
-  if not exists (
-    select 1 from public.post_packages where id = p_package_id and workspace_id = p_workspace_id
-      and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
-  ) then raise exception 'Post package changed since it was last read'; end if;
+  perform 1 from public.post_packages
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
+  for update;
+  if not found then raise exception 'Post package changed since it was last read'; end if;
   update public.post_package_destinations
   set status = 'skipped', skip_reason = nullif(trim(p_skip_reason), '')
-  where package_id = p_package_id and workspace_id = p_workspace_id
-    and destination_id = p_destination_id and status = 'planned';
+  where id = p_distribution_item_id and package_id = p_package_id
+    and workspace_id = p_workspace_id and status = 'planned';
   if not found then raise exception 'Planned destination is unavailable'; end if;
   update public.post_packages set updated_by = p_actor_user_id, updated_source = p_source
   where id = p_package_id returning to_jsonb(post_packages.*) into v_result;
@@ -614,7 +637,7 @@ $$;
 create function public.record_post_from_package(
   p_workspace_id uuid,
   p_package_id uuid,
-  p_destination_id uuid,
+  p_distribution_item_id uuid,
   p_actor_user_id uuid,
   p_source text,
   p_request_id uuid,
@@ -625,12 +648,13 @@ create function public.record_post_from_package(
 returns jsonb language plpgsql set search_path = '' as $$
 declare
   v_payload jsonb := jsonb_build_object(
-    'package_id', p_package_id, 'destination_id', p_destination_id,
+    'package_id', p_package_id, 'distribution_item_id', p_distribution_item_id,
     'expected_updated_at', p_expected_updated_at, 'published_at', p_published_at,
     'notes', nullif(trim(p_notes), '')
   );
   v_result jsonb;
   v_opportunity_id uuid;
+  v_destination_id uuid;
   v_variant_id uuid;
   v_caption text;
   v_override_destination uuid;
@@ -640,26 +664,32 @@ begin
     p_workspace_id, 'record_post_from_package', p_actor_user_id, p_source, p_request_id, v_payload
   );
   if v_result is not null then return v_result; end if;
-  select pp.opportunity_id, pd.caption_variant_id, v.body, v.destination_id
-    into v_opportunity_id, v_variant_id, v_caption, v_override_destination
-  from public.post_packages pp
-  join public.post_package_destinations pd on pd.package_id = pp.id and pd.workspace_id = pp.workspace_id
+  select opportunity_id into v_opportunity_id
+  from public.post_packages
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing') and updated_at = p_expected_updated_at
+  for update;
+  if not found then raise exception 'Post package changed since it was last read'; end if;
+
+  select pd.destination_id, pd.caption_variant_id, v.body, v.destination_id
+    into v_destination_id, v_variant_id, v_caption, v_override_destination
+  from public.post_package_destinations pd
   join public.post_package_caption_variants v
-    on v.id = pd.caption_variant_id and v.package_id = pp.id and v.workspace_id = pp.workspace_id
-  join public.destinations d on d.id = pd.destination_id and d.workspace_id = pp.workspace_id
-  where pp.id = p_package_id and pp.workspace_id = p_workspace_id
-    and pp.status in ('draft', 'publishing') and pp.updated_at = p_expected_updated_at
-    and pd.destination_id = p_destination_id and pd.status = 'planned'
-    and v.status = 'approved' and d.is_active;
+    on v.id = pd.caption_variant_id and v.package_id = pd.package_id and v.workspace_id = pd.workspace_id
+  join public.destinations d on d.id = pd.destination_id and d.workspace_id = pd.workspace_id
+  where pd.id = p_distribution_item_id and pd.package_id = p_package_id
+    and pd.workspace_id = p_workspace_id and pd.status = 'planned'
+    and v.status = 'approved' and d.is_active
+  for update of pd;
   if not found then raise exception 'Approved planned package destination is unavailable'; end if;
-  if v_override_destination is not null and v_override_destination <> p_destination_id then
+  if v_override_destination is not null and v_override_destination <> v_destination_id then
     raise exception 'Destination override does not match the publication destination';
   end if;
   insert into public.posts(
     workspace_id, content_opportunity_id, destination_id, published_at, caption,
     angle, notes, post_package_id, caption_variant_id
   )
-  select p_workspace_id, opportunity_id, p_destination_id, p_published_at, v_caption,
+  select p_workspace_id, opportunity_id, v_destination_id, p_published_at, v_caption,
     working_angle, nullif(trim(p_notes), ''), id, v_variant_id
   from public.post_packages where id = p_package_id
   returning id into v_post_id;
@@ -671,11 +701,16 @@ begin
   where package_id = p_package_id order by position;
   update public.post_package_destinations
   set status = 'published', post_id = v_post_id, skip_reason = null
-  where package_id = p_package_id and destination_id = p_destination_id;
+  where id = p_distribution_item_id and package_id = p_package_id
+    and workspace_id = p_workspace_id and status = 'planned';
+  if not found then raise exception 'Distribution item was published concurrently'; end if;
   update public.post_packages
   set status = 'publishing', updated_by = p_actor_user_id, updated_source = p_source
   where id = p_package_id;
-  select to_jsonb(posts.*) into v_result from public.posts where id = v_post_id;
+  select to_jsonb(posts.*) || jsonb_build_object(
+    'distribution_item_id', p_distribution_item_id,
+    'package_updated_at', (select updated_at from public.post_packages where id = p_package_id)
+  ) into v_result from public.posts where id = v_post_id;
   perform public.complete_post_package_mutation(
     p_workspace_id, 'record_post_from_package', p_actor_user_id, p_source,
     p_request_id, v_payload, v_result
@@ -707,7 +742,8 @@ begin
   if v_result is not null then return v_result; end if;
   select status into v_status from public.post_packages
   where id = p_package_id and workspace_id = p_workspace_id and updated_at = p_expected_updated_at
-    and status in ('draft', 'publishing');
+    and status in ('draft', 'publishing')
+  for update;
   if not found then raise exception 'Post package changed since it was last read'; end if;
   if p_outcome = 'closed' then
     if v_status <> 'publishing' then raise exception 'Only a publishing package can be closed'; end if;
@@ -758,23 +794,42 @@ grant execute on function public.skip_post_package_destination(uuid,uuid,uuid,uu
 grant execute on function public.record_post_from_package(uuid,uuid,uuid,uuid,text,uuid,timestamptz,timestamptz,text) to service_role;
 grant execute on function public.finish_post_package(uuid,uuid,uuid,text,uuid,timestamptz,text) to service_role;
 
-insert into public.post_packages(
-  workspace_id, opportunity_id, sequence, status, base_caption, working_angle, notes,
-  created_by, updated_by, created_source, updated_source, closed_at
-)
-select p.workspace_id, p.content_opportunity_id, 1, 'closed', null, null, null,
-  null, null, 'migration', 'migration', now()
-from public.posts p
-where p.content_opportunity_id is not null
-group by p.workspace_id, p.content_opportunity_id;
+create function public.backfill_legacy_post_packages()
+returns void language plpgsql set search_path = '' as $$
+begin
+  insert into public.post_packages(
+    workspace_id, opportunity_id, sequence, status, base_caption, working_angle, notes,
+    created_by, updated_by, created_source, updated_source
+  )
+  select p.workspace_id, p.content_opportunity_id, 1, 'draft', null, null, null,
+    null, null, 'migration', 'migration'
+  from public.posts p
+  where p.content_opportunity_id is not null
+    and not exists (
+      select 1 from public.post_packages existing
+      where existing.opportunity_id = p.content_opportunity_id
+    )
+  group by p.workspace_id, p.content_opportunity_id;
 
-update public.posts p
-set post_package_id = pp.id
-from public.post_packages pp
-where pp.workspace_id = p.workspace_id
-  and pp.opportunity_id = p.content_opportunity_id
-  and pp.created_source = 'migration'
-  and p.post_package_id is null;
+  update public.posts p
+  set post_package_id = pp.id
+  from public.post_packages pp
+  where pp.workspace_id = p.workspace_id
+    and pp.opportunity_id = p.content_opportunity_id
+    and pp.sequence = 1
+    and pp.created_source = 'migration'
+    and p.post_package_id is null;
+
+  update public.post_packages
+  set status = 'closed', closed_at = now(), updated_source = 'migration'
+  where created_source = 'migration' and status = 'draft';
+end;
+$$;
+
+revoke execute on function public.backfill_legacy_post_packages()
+  from public, anon, authenticated, service_role;
+
+select public.backfill_legacy_post_packages();
 
 create function public.reject_terminal_post_package_publication_mutation()
 returns trigger language plpgsql set search_path = '' as $$

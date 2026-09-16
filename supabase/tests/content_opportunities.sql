@@ -11,6 +11,8 @@ declare
   v_development_opportunity_id uuid;
   v_mcp_request_id uuid := 'b0000000-0000-4000-8000-000000000001';
 begin
+  perform public.backfill_legacy_post_packages();
+  perform public.backfill_legacy_post_packages();
   if (select count(*) from public.content_opportunities) < 10 then
     raise exception 'Expected at least ten seeded content opportunities';
   end if;
@@ -19,6 +21,33 @@ begin
     where content_opportunity_id = '90000000-0000-4000-8000-000000000006'
   ) <> 2 then
     raise exception 'Antonia comparison must have two destination publications';
+  end if;
+  if exists (
+    select 1 from public.posts
+    where content_opportunity_id is not null and post_package_id is null
+  ) then
+    raise exception 'Every historical opportunity Post must be linked to a legacy package';
+  end if;
+  if exists (
+    select 1
+    from public.content_opportunities o
+    where exists (select 1 from public.posts p where p.content_opportunity_id = o.id)
+      and (
+        select count(*) from public.post_packages pp
+        where pp.opportunity_id = o.id
+          and pp.sequence = 1
+          and pp.created_source = 'migration'
+      ) <> 1
+  ) then
+    raise exception 'Posted opportunities must have exactly one sequence-1 legacy package';
+  end if;
+  if exists (
+    select 1
+    from public.content_opportunities o
+    join public.post_packages pp on pp.opportunity_id = o.id and pp.created_source = 'migration'
+    where not exists (select 1 from public.posts p where p.content_opportunity_id = o.id)
+  ) then
+    raise exception 'Never-posted opportunities must not receive legacy packages';
   end if;
   if exists (
     select 1
