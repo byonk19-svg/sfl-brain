@@ -20,6 +20,21 @@ begin
   ) <> 2 then
     raise exception 'Antonia comparison must have two destination publications';
   end if;
+  if exists (
+    select 1
+    from public.post_packages pp
+    where pp.created_source = 'migration'
+      and (
+        pp.status <> 'closed'
+        or pp.closed_at is null
+        or nullif(trim(pp.base_caption), '') is not null
+        or exists (select 1 from public.post_package_caption_variants v where v.package_id = pp.id)
+        or exists (select 1 from public.post_package_assets a where a.package_id = pp.id)
+        or exists (select 1 from public.post_package_destinations d where d.package_id = pp.id)
+      )
+  ) then
+    raise exception 'Legacy backfill invented package preparation state';
+  end if;
   if has_table_privilege('anon', 'public.content_opportunities', 'select') then
     raise exception 'Anonymous role must not read content opportunities';
   end if;
