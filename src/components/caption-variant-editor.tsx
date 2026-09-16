@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 
 import type { PostPackageCaptionVariant } from "@/lib/post-package";
 import { copyBaseCaption } from "@/lib/post-package";
+import { CopyButton } from "@/components/copy-button";
 
 type DestinationOption = { id: string; name: string };
 type FormAction = (formData: FormData) => void | Promise<void>;
@@ -44,10 +45,11 @@ export function CaptionVariantEditor({
           {variants.map((variant) => (
             <article className="package-card" key={variant.id}>
               <div className="package-card-heading">
-                <strong>{variant.destination_id ? "Destination override" : audienceLabel(variant.audience)}</strong>
+                <strong>{variantDisplayLabel(variant, destinations)}</strong>
                 <span className={`package-status status-${variant.status}`}>{variant.status === "approved" ? "Approved" : "Draft"}</span>
               </div>
               <p className="package-copy">{variant.body}</p>
+              {variant.status === "approved" && <CopyButton value={variant.body} label={`Copy ${variantDisplayLabel(variant, destinations)} caption`} />}
               <details className="inline-editor">
                 <summary>Edit variant</summary>
                 <VariantForm
@@ -148,4 +150,10 @@ function audienceLabel(audience: PostPackageCaptionVariant["audience"]) {
     instagram: "Instagram",
     custom: "Custom audience",
   }[audience];
+}
+
+function variantDisplayLabel(variant: PostPackageCaptionVariant, destinations: DestinationOption[]) {
+  if (!variant.destination_id) return audienceLabel(variant.audience);
+  const destination = destinations.find((item) => item.id === variant.destination_id);
+  return `Destination override · ${destination?.name ?? variant.destination_id}`;
 }

@@ -296,6 +296,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .package-archive details { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .package-archive summary { cursor: pointer; font-weight: 800; }
 .package-archive-body { padding: 14px 0; }
+.archive-context { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 18px; }
+.archive-context > div > span { color: var(--ink-soft); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.archive-context p { margin: 8px 0 0; line-height: 1.6; }
+.archive-section { display: grid; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.archive-section h4 { margin: 0; font: 600 19px/1.2 var(--font-display), serif; }
+.archive-row { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(220px, 1.5fr) auto; align-items: start; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.archive-row > div { display: grid; gap: 4px; }
+.archive-row span, .archive-row small, .archive-asset-row span, .archive-asset-row small { color: var(--ink-soft); font-size: 11px; }
+.archive-row .package-copy { margin: 0; }
+.archive-asset-row { display: grid; grid-template-columns: 84px 1fr; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.archive-asset-row img, .archive-asset-row .asset-placeholder { width: 84px; aspect-ratio: 1; object-fit: cover; }
+.archive-asset-row > div { display: grid; gap: 5px; }
+.publication-pending { grid-column: 1 / -1; margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
 .package-archive dl { display: flex; flex-wrap: wrap; gap: 18px; }
 .package-archive dl > div { display: grid; gap: 4px; }
 .package-archive dt { color: var(--ink-soft); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
@@ -310,6 +323,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   .distribution-row .text-button { grid-column: 1 / -1; justify-self: start; }
   .skip-form, .distribution-choice { grid-template-columns: 1fr; }
   .package-actions, .package-finish-form { align-items: stretch; flex-direction: column; }
+  .archive-context, .archive-row { grid-template-columns: 1fr; }
 }
 .backlog-item { border-bottom: 1px solid var(--line); }
 .backlog-item .backlog-row { border-bottom: 0; }

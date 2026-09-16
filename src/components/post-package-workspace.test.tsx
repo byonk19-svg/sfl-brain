@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PostPackageContext } from "@/lib/post-package";
@@ -46,7 +46,9 @@ describe("PostPackageWorkspace", () => {
     expect(startPackage).toHaveBeenCalledOnce();
   });
 
-  it("keeps active package controls visible and prior packages read-only", () => {
+  it("copies approved copy, defers publication recording, and renders complete prior packages read-only", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(
       <PostPackageWorkspace
         context={{
@@ -121,17 +123,43 @@ describe("PostPackageWorkspace", () => {
             sequence: 1,
             status: "closed",
             base_caption: "Previous exact copy",
-            working_angle: null,
-            notes: null,
+            working_angle: "Archived angle",
+            notes: "Archived package note",
             created_source: "website",
             updated_source: "website",
             created_at: "2026-08-01T12:00:00Z",
             updated_at: "2026-08-02T12:00:00Z",
             closed_at: "2026-08-02T12:00:00Z",
             abandoned_at: null,
-            caption_variants: [],
-            assets: [],
-            distribution_items: [],
+            caption_variants: [{
+              id: "50000000-0000-4000-8000-000000000009",
+              audience: "custom",
+              destination_id: "20000000-0000-4000-8000-000000000003",
+              body: "Archived approved override",
+              status: "approved",
+              approved_by: "10000000-0000-4000-8000-000000000001",
+              approved_at: "2026-08-01T13:00:00Z",
+              created_at: "2026-08-01T12:00:00Z",
+              updated_at: "2026-08-01T13:00:00Z",
+            }],
+            assets: [{
+              asset_id: "70000000-0000-4000-8000-000000000009",
+              role: "hero",
+              position: 0,
+              note: "Archived hero note",
+              asset: { id: "70000000-0000-4000-8000-000000000009", title: "Archived room", asset_type: "photo", source: "home", captured_at: "2026-07-31T12:00:00Z", signed_url: "https://example.test/archive-preview" },
+            }],
+            distribution_items: [{
+              id: "60000000-0000-4000-8000-000000000009",
+              destination_id: "20000000-0000-4000-8000-000000000003",
+              caption_variant_id: "50000000-0000-4000-8000-000000000009",
+              status: "skipped",
+              post_id: null,
+              skip_reason: "Archived skip reason",
+              created_at: "2026-08-01T12:00:00Z",
+              updated_at: "2026-08-02T12:00:00Z",
+              destination: { ...destination, id: "20000000-0000-4000-8000-000000000003", name: "Instagram" },
+            }],
           }],
         }}
         destinations={[destination, { ...destination, id: "20000000-0000-4000-8000-000000000002", name: "SFL Group" }, { ...destination, id: "20000000-0000-4000-8000-000000000003", name: "Instagram" }]}
@@ -144,11 +172,28 @@ describe("PostPackageWorkspace", () => {
     expect(screen.getByRole("button", { name: "Close package" })).toBeDisabled();
     expect(screen.getByText("Planned")).toBeVisible();
     expect(screen.getByText("Published")).toBeVisible();
-    expect(screen.getByText("Skipped")).toBeVisible();
+    expect(screen.getAllByText("Skipped")[0]).toBeVisible();
     expect(screen.getByRole("img", { name: "Room preview" })).toHaveAttribute("src", "https://example.test/signed-preview");
     expect(screen.getByLabelText("Role")).toHaveValue("hero");
     expect(screen.getByLabelText("Order")).toHaveValue(0);
+    expect(screen.queryByRole("link", { name: "Record publication" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Publication recording will be available here once package publishing is connected/i)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Copy SFL Page caption" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Approved copy"));
     expect(screen.getByText("Previous exact copy")).toBeInTheDocument();
-    expect(screen.getByText("Package 1 · Closed").closest("details")).toHaveAttribute("data-read-only", "true");
+    const archive = screen.getByText("Package 1 · Closed").closest("details")!;
+    expect(archive).toHaveAttribute("data-read-only", "true");
+    fireEvent.click(screen.getByText("Package 1 · Closed"));
+    expect(screen.getByText("Archived angle")).toBeVisible();
+    expect(screen.getByText("Archived package note")).toBeVisible();
+    expect(screen.getByText("Archived approved override")).toBeVisible();
+    expect(screen.getByText("Custom audience · Instagram")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Archived room" })).toHaveAttribute("src", "https://example.test/archive-preview");
+    expect(screen.getByText("Hero · position 1 · Archived hero note")).toBeVisible();
+    expect(screen.getByText("Archived skip reason")).toBeVisible();
+    expect(screen.getByText("No publication recorded")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Copy archived Custom audience · Instagram caption" })).toBeVisible();
+    expect(archive.querySelector("form")).toBeNull();
+    expect(archive.querySelector("input, textarea, select")).toBeNull();
   });
 });
