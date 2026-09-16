@@ -283,7 +283,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .package-actions, .package-finish-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .package-asset-list { display: grid; gap: 12px; margin-bottom: 16px; }
 .package-asset-row { display: grid; grid-template-columns: 92px minmax(170px, 1.4fr) repeat(3, minmax(110px, .7fr)); align-items: end; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.package-asset-row img, .package-asset-row .asset-placeholder { width: 92px; aspect-ratio: 1; object-fit: cover; }
+.package-asset-row img, .package-asset-row video, .package-asset-row .asset-placeholder { width: 92px; aspect-ratio: 1; object-fit: cover; }
 .package-asset-choice { align-self: center; display: flex; flex-direction: row; align-items: center; gap: 9px; color: var(--ink); letter-spacing: 0; text-transform: none; }
 .package-asset-choice input { width: auto; }
 .distribution-list { display: grid; }
@@ -306,7 +306,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .archive-row span, .archive-row small, .archive-asset-row span, .archive-asset-row small { color: var(--ink-soft); font-size: 11px; }
 .archive-row .package-copy { margin: 0; }
 .archive-asset-row { display: grid; grid-template-columns: 84px 1fr; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.archive-asset-row img, .archive-asset-row .asset-placeholder { width: 84px; aspect-ratio: 1; object-fit: cover; }
+.archive-asset-row img, .archive-asset-row video, .archive-asset-row .asset-placeholder { width: 84px; aspect-ratio: 1; object-fit: cover; }
 .archive-asset-row > div { display: grid; gap: 5px; }
 .publication-pending { grid-column: 1 / -1; margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
 .package-archive dl { display: flex; flex-wrap: wrap; gap: 18px; }
@@ -317,7 +317,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
 @media (max-width: 700px) {
   .package-asset-row { grid-template-columns: 72px 1fr; align-items: start; }
-  .package-asset-row img, .package-asset-row .asset-placeholder { width: 72px; grid-row: span 2; }
+  .package-asset-row img, .package-asset-row video, .package-asset-row .asset-placeholder { width: 72px; grid-row: span 2; }
   .package-asset-row label:not(.package-asset-choice) { grid-column: 1 / -1; }
   .distribution-row { grid-template-columns: 1fr auto; align-items: start; }
   .distribution-row .text-button { grid-column: 1 / -1; justify-self: start; }

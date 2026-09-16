@@ -17,6 +17,7 @@ import {
   listingSchema,
   opportunityAssetSchema,
   opportunityProductSchema,
+  packageAssetSelectionSchema,
   placeOpportunityHoldSchema,
   postPackageVariantSchema,
   radarEventSchema,
@@ -566,20 +567,17 @@ export async function uploadPostPackageAssetAction(formData: FormData) {
     const opportunityId = editOpportunitySchema.shape.id.parse(formString(formData, "opportunity_id"));
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("Choose a file to upload.");
+    const currentAssets = packageAssetSelectionSchema.parse(JSON.parse(formString(formData, "current_assets") || "[]"));
     const brain = await createWebsiteBrainService();
-    const assetId = await brain.uploadAsset({
+    await brain.uploadPostPackageAsset({
       opportunityId,
+      packageId: formString(formData, "package_id"),
+      expectedUpdatedAt: formString(formData, "expected_updated_at"),
+      currentAssets,
       title: formString(formData, "title"),
       source: formString(formData, "source") as "home" | "in_store" | "canva" | "web" | "other",
       file,
     });
-    const current = JSON.parse(formString(formData, "current_assets") || "[]") as unknown;
-    const input = setPostPackageAssetsSchema.parse({
-      package_id: formString(formData, "package_id"),
-      expected_updated_at: formString(formData, "expected_updated_at"),
-      assets: [...(Array.isArray(current) ? current : []), { asset_id: assetId, role: "supporting", position: Array.isArray(current) ? current.length : 0 }],
-    });
-    await brain.setPostPackageAssets(input);
     revalidatePackageViews(destination);
     destination = messageUrl(destination, "success", "Private asset uploaded and attached to the package.");
   } catch (error) {

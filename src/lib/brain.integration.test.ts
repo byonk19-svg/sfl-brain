@@ -374,6 +374,78 @@ integration("local Supabase integration", () => {
     });
   });
 
+  it("compensates only the newly uploaded package asset after a downstream stale write", async () => {
+    const env = getServerEnv();
+    const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const createdUser = await admin.auth.admin.createUser({ email: `package-upload-${crypto.randomUUID()}@example.test`, email_confirm: true });
+    if (createdUser.error || !createdUser.data.user) throw new Error(createdUser.error?.message ?? "Package upload actor was not created");
+    const actorId = createdUser.data.user.id;
+    const membership = await admin.from("workspace_members").insert({ workspace_id: env.SFL_WORKSPACE_ID, user_id: actorId });
+    if (membership.error) throw new Error(membership.error.message);
+    const brain = createBrainService(env.SFL_WORKSPACE_ID, { userId: actorId, source: "website" });
+    let opportunityId: string | null = null;
+    let preservedAssetId: string | null = null;
+    let preservedStoragePath: string | null = null;
+    const compensatedTitle = `Compensated upload ${crypto.randomUUID()}`;
+
+    try {
+      opportunityId = await brain.createContentOpportunity({
+        title: `Compensated package upload ${crypto.randomUUID()}`,
+        status: "needs_assets",
+        content_type: "collection_roundup",
+        media_format: "carousel",
+        notes: undefined,
+        next_action: "Build package",
+        estimated_minutes_remaining: 15,
+        product_ids: [],
+        asset_ids: [],
+      });
+      const postPackage = await brain.createPostPackage({ opportunity_id: opportunityId, base_caption: "Package copy" });
+      preservedAssetId = await brain.uploadAsset({
+        opportunityId,
+        title: "Pre-existing package asset",
+        source: "home",
+        file: new File([new Uint8Array([137, 80, 78, 71])], "preserved.png", { type: "image/png" }),
+      });
+      const storedAsset = await admin.from("assets").select("storage_path").eq("workspace_id", env.SFL_WORKSPACE_ID).eq("id", preservedAssetId).single();
+      if (storedAsset.error) throw storedAsset.error;
+      preservedStoragePath = storedAsset.data.storage_path;
+      if (!preservedStoragePath) throw new Error("Pre-existing package asset did not retain a Storage path");
+
+      await expect(brain.uploadPostPackageAsset({
+        opportunityId,
+        packageId: postPackage.id,
+        expectedUpdatedAt: "2000-01-01T00:00:00.000Z",
+        currentAssets: [],
+        title: compensatedTitle,
+        source: "home",
+        file: new File([new Uint8Array([137, 80, 78, 71])], "compensated.png", { type: "image/png" }),
+      })).rejects.toThrow(/changed since/i);
+
+      expect((await admin.from("assets").select("id", { count: "exact", head: true }).eq("workspace_id", env.SFL_WORKSPACE_ID).eq("title", compensatedTitle)).count).toBe(0);
+      expect((await admin.from("content_opportunity_assets").select("asset_id", { count: "exact", head: true }).eq("opportunity_id", opportunityId)).count).toBe(1);
+      expect((await admin.from("assets").select("id", { count: "exact", head: true }).eq("id", preservedAssetId)).count).toBe(1);
+      expect((await admin.storage.from("sfl-assets").download(preservedStoragePath)).error).toBeNull();
+      const folder = `${env.SFL_WORKSPACE_ID}/opportunities/${opportunityId}`;
+      const storedObjects = await admin.storage.from("sfl-assets").list(folder);
+      if (storedObjects.error) throw storedObjects.error;
+      expect(storedObjects.data.map((item) => item.name)).toEqual([preservedStoragePath.split("/").at(-1)]);
+    } finally {
+      const residual = await admin.from("assets").select("id,storage_path").eq("workspace_id", env.SFL_WORKSPACE_ID).eq("title", compensatedTitle);
+      for (const asset of residual.data ?? []) {
+        await admin.from("assets").delete().eq("id", asset.id);
+        if (asset.storage_path) await admin.storage.from("sfl-assets").remove([asset.storage_path]);
+      }
+      if (opportunityId) await admin.from("content_opportunities").delete().eq("id", opportunityId);
+      if (preservedAssetId) await admin.from("assets").delete().eq("id", preservedAssetId);
+      if (preservedStoragePath) await admin.storage.from("sfl-assets").remove([preservedStoragePath]);
+      await admin.from("workspace_members").delete().eq("workspace_id", env.SFL_WORKSPACE_ID).eq("user_id", actorId);
+      await admin.auth.admin.deleteUser(actorId);
+    }
+  });
+
   it("idempotently creates one clearly labeled development test opportunity", async () => {
     const brain = createBrainService();
     const requestId = crypto.randomUUID();

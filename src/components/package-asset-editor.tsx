@@ -13,6 +13,8 @@ export function PackageAssetEditor({ packageId, opportunityId, expectedUpdatedAt
   uploadAsset?: FormAction;
 }) {
   const selectedIds = new Set(selections.map((selection) => selection.asset_id));
+  const firstNewPosition = Math.max(-1, ...selections.map((selection) => selection.position)) + 1;
+  const newPositions = new Map(assets.filter((asset) => !selectedIds.has(asset.id)).map((asset, index) => [asset.id, firstNewPosition + index]));
   return (
     <div className="package-subsection">
       <h3>Package assets</h3>
@@ -26,12 +28,10 @@ export function PackageAssetEditor({ packageId, opportunityId, expectedUpdatedAt
             const preview = selected?.asset.signed_url ?? asset.signed_url;
             return (
               <article className="package-asset-row" key={asset.id}>
-                {/* Signed private previews use short-lived hosts that are intentionally not configured for Next Image. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {preview ? <img src={preview} alt={asset.title ?? `${asset.asset_type} preview`} /> : <div className="asset-placeholder">No preview</div>}
+                <AssetPreview signedUrl={preview} assetType={asset.asset_type} title={asset.title} />
                 <label className="package-asset-choice"><input type="checkbox" name="asset_ids" value={asset.id} defaultChecked={selectedIds.has(asset.id)} />{asset.title ?? asset.asset_type}</label>
                 <label>Role<select name={`asset_role_${asset.id}`} defaultValue={selected?.role ?? "supporting"}><option value="hero">Hero</option><option value="supporting">Supporting</option><option value="comparison">Comparison</option></select></label>
-                <label>Order<input name={`asset_position_${asset.id}`} type="number" min="0" max="99" defaultValue={selected?.position ?? selections.length} /></label>
+                <label>Order<input name={`asset_position_${asset.id}`} type="number" min="0" max="99" defaultValue={selected?.position ?? newPositions.get(asset.id)} /></label>
                 <label>Package note<input name={`asset_note_${asset.id}`} defaultValue={selected?.note ?? ""} /></label>
               </article>
             );
@@ -54,4 +54,13 @@ export function PackageAssetEditor({ packageId, opportunityId, expectedUpdatedAt
       </details>
     </div>
   );
+}
+
+export function AssetPreview({ signedUrl, assetType, title }: { signedUrl: string | null | undefined; assetType: string; title: string | null }) {
+  if (!signedUrl) return <div className="asset-placeholder">No preview</div>;
+  const label = title ?? `${assetType} preview`;
+  if (assetType === "video") return <video src={signedUrl} aria-label={label} controls preload="metadata" />;
+  // Signed private previews use short-lived hosts that are intentionally not configured for Next Image.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={signedUrl} alt={label} />;
 }

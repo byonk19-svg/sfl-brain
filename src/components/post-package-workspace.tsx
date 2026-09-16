@@ -1,9 +1,8 @@
-/* eslint-disable @next/next/no-img-element -- Archive previews use private short-lived signed URLs. */
 import type { PostPackageContext } from "@/lib/post-package";
 import { canFinishPackage, sourceLabel } from "@/lib/post-package";
 import { CaptionVariantEditor } from "@/components/caption-variant-editor";
 import { DistributionPlanEditor } from "@/components/distribution-plan-editor";
-import { PackageAssetEditor } from "@/components/package-asset-editor";
+import { AssetPreview, PackageAssetEditor } from "@/components/package-asset-editor";
 import { CopyButton } from "@/components/copy-button";
 
 type FormAction = (formData: FormData) => void | Promise<void>;
@@ -80,7 +79,7 @@ export function PostPackageWorkspace({ context, destinations, opportunityAssets,
           const variantLabel = `${archiveAudienceLabel(variant.audience)}${variant.destination_id ? ` · ${destinationName ?? variant.destination_id}` : ""}`;
           return <article className="archive-row" key={variant.id}><div><strong>{variantLabel}</strong><span>{variant.status === "approved" ? "Approved" : "Draft"}</span></div><p className="package-copy">{variant.body}</p>{variant.status === "approved" && <CopyButton value={variant.body} label={`Copy archived ${variantLabel} caption`} />}</article>;
         }) : <p className="muted">No caption variants were preserved.</p>}</section>
-        <section className="archive-section"><h4>Package assets</h4>{item.assets.length ? item.assets.map((selection) => <article className="archive-asset-row" key={selection.asset_id}>{selection.asset.signed_url ? <><img src={selection.asset.signed_url} alt={selection.asset.title ?? `${selection.asset.asset_type} preview`} /></> : <div className="asset-placeholder">No preview</div>}<div><strong>{selection.asset.title || "Untitled asset"}</strong><span>{archiveAssetDescription(selection.role, selection.position, selection.note)}</span><small>{selection.asset.asset_type}{selection.asset.source ? ` · ${selection.asset.source}` : ""}</small></div></article>) : <p className="muted">No package assets were preserved.</p>}</section>
+        <section className="archive-section"><h4>Package assets</h4>{item.assets.length ? item.assets.map((selection) => <article className="archive-asset-row" key={selection.asset_id}><AssetPreview signedUrl={selection.asset.signed_url} assetType={selection.asset.asset_type} title={selection.asset.title} /><div><strong>{selection.asset.title || "Untitled asset"}</strong><span>{archiveAssetDescription(selection.role, selection.position, selection.note)}</span><small>{selection.asset.asset_type}{selection.asset.source ? ` · ${selection.asset.source}` : ""}</small></div></article>) : <p className="muted">No package assets were preserved.</p>}</section>
         <section className="archive-section"><h4>Distribution</h4>{item.distribution_items.length ? item.distribution_items.map((distribution) => <article className="archive-row" key={distribution.id}><div><strong>{distribution.destination.name}</strong><span>{distribution.status[0]!.toUpperCase() + distribution.status.slice(1)}</span></div>{distribution.skip_reason && <p>{distribution.skip_reason}</p>}<small>{distribution.post_id ? `Publication ${distribution.post_id}` : "No publication recorded"}</small></article>) : <p className="muted">No distribution items were preserved.</p>}</section>
       </div></details>)}</div>}
     </section>

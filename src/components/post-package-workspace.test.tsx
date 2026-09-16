@@ -148,6 +148,12 @@ describe("PostPackageWorkspace", () => {
               position: 0,
               note: "Archived hero note",
               asset: { id: "70000000-0000-4000-8000-000000000009", title: "Archived room", asset_type: "photo", source: "home", captured_at: "2026-07-31T12:00:00Z", signed_url: "https://example.test/archive-preview" },
+            }, {
+              asset_id: "70000000-0000-4000-8000-000000000010",
+              role: "supporting",
+              position: 1,
+              note: "Archived motion",
+              asset: { id: "70000000-0000-4000-8000-000000000010", title: "Archived room tour", asset_type: "video", source: "home", captured_at: "2026-07-31T12:00:00Z", signed_url: "https://example.test/archive-video.mp4" },
             }],
             distribution_items: [{
               id: "60000000-0000-4000-8000-000000000009",
@@ -189,6 +195,9 @@ describe("PostPackageWorkspace", () => {
     expect(screen.getByText("Archived approved override")).toBeVisible();
     expect(screen.getByText("Custom audience · Instagram")).toBeVisible();
     expect(screen.getByRole("img", { name: "Archived room" })).toHaveAttribute("src", "https://example.test/archive-preview");
+    expect(archive.querySelector("video")).toHaveAttribute("src", "https://example.test/archive-video.mp4");
+    expect(archive.querySelector("video")).toHaveAttribute("controls");
+    expect(archive.querySelector("video")).toHaveAttribute("preload", "metadata");
     expect(screen.getByText("Hero · position 1 · Archived hero note")).toBeVisible();
     expect(screen.getByText("Archived skip reason")).toBeVisible();
     expect(screen.getByText("No publication recorded")).toBeVisible();

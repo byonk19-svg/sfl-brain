@@ -107,6 +107,10 @@ function assertResult<T>(result: { data: T | null; error: { message: string } | 
   return result.data;
 }
 
+function describeFailure(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown failure";
+}
+
 function toRecommendationInput(row: ProductGraphRow): RecommendationInput {
   const listings = row.listings ?? [];
   return {
@@ -321,6 +325,77 @@ export class BrainService {
         .single(),
       "Update destination",
     ) as unknown as DestinationRecord;
+  }
+
+  async removeNewOpportunityAsset(options: { opportunityId: string; assetId: string; uploadedAfter: string }) {
+    await this.requireMutationActorMembership();
+    const [opportunity, join, asset] = await Promise.all([
+      this.client.from("content_opportunities").select("id").eq("workspace_id", this.workspaceId).eq("id", options.opportunityId).maybeSingle(),
+      this.client.from("content_opportunity_assets").select("asset_id").eq("opportunity_id", options.opportunityId).eq("asset_id", options.assetId).maybeSingle(),
+      this.client.from("assets").select("id,storage_path,created_at").eq("workspace_id", this.workspaceId).eq("id", options.assetId).maybeSingle(),
+    ]);
+    if (opportunity.error || !opportunity.data || join.error || !join.data || asset.error || !asset.data) {
+      throw new Error("Refusing package upload cleanup because the exact workspace opportunity asset could not be verified.");
+    }
+    if (!Number.isFinite(Date.parse(options.uploadedAfter)) || Date.parse(asset.data.created_at) < Date.parse(options.uploadedAfter)) {
+      throw new Error("Refusing package upload cleanup because the asset predates this upload attempt.");
+    }
+
+    const storagePath = asset.data.storage_path;
+    if (storagePath) {
+      const removedObject = await this.client.storage.from("sfl-assets").remove([storagePath]);
+      if (removedObject.error) throw new Error(`Remove newly uploaded Storage object: ${removedObject.error.message}`);
+    }
+    const removedAsset = await this.client
+      .from("assets")
+      .delete()
+      .eq("workspace_id", this.workspaceId)
+      .eq("id", options.assetId)
+      .select("id")
+      .maybeSingle();
+    if (removedAsset.error || !removedAsset.data) {
+      throw new Error(`Remove newly uploaded asset metadata: ${removedAsset.error?.message ?? "exact asset was not removed"}`);
+    }
+  }
+
+  async uploadPostPackageAsset(options: {
+    opportunityId: string;
+    packageId: string;
+    expectedUpdatedAt: string;
+    currentAssets: z.infer<typeof setPostPackageAssetsSchema>["assets"];
+    title?: string;
+    source: "home" | "in_store" | "canva" | "web" | "other";
+    file: File;
+  }) {
+    const uploadedAfter = new Date().toISOString();
+    const assetId = await this.uploadAsset({
+      opportunityId: options.opportunityId,
+      title: options.title,
+      source: options.source,
+      file: options.file,
+    });
+    try {
+      const nextPosition = Math.max(-1, ...options.currentAssets.map((selection) => selection.position)) + 1;
+      await this.setPostPackageAssets({
+        package_id: options.packageId,
+        expected_updated_at: options.expectedUpdatedAt,
+        assets: [...options.currentAssets, { asset_id: assetId, role: "supporting", position: nextPosition }],
+      });
+    } catch (downstreamError) {
+      try {
+        await this.removeNewOpportunityAsset({ opportunityId: options.opportunityId, assetId, uploadedAfter });
+      } catch (cleanupError) {
+        console.error("Post Package upload compensation failed", {
+          opportunityId: options.opportunityId,
+          assetId,
+          downstreamError: describeFailure(downstreamError),
+          cleanupError: describeFailure(cleanupError),
+        });
+        throw new Error(`${describeFailure(downstreamError)} Cleanup of the newly uploaded asset also failed: ${describeFailure(cleanupError)}`);
+      }
+      throw downstreamError;
+    }
+    return assetId;
   }
 
   async searchLibrary(query = "", limit = 50): Promise<JsonRecord[]> {
