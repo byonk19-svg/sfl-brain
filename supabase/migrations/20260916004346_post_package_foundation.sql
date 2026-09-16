@@ -229,7 +229,7 @@ begin
   if p_source in ('chatgpt_connector', 'development_tunnel') and p_request_id is null then
     raise exception 'Connector post package request ID is required';
   end if;
-  if p_source in ('website', 'chatgpt_connector') and (
+  if p_source in ('website', 'chatgpt_connector', 'development_tunnel') and (
     p_actor_user_id is null or not exists (
       select 1 from public.workspace_members
       where workspace_id = p_workspace_id and user_id = p_actor_user_id
@@ -393,6 +393,7 @@ declare
   v_body text;
   v_old_body text;
   v_package_base_caption text;
+  v_package_updated_at timestamptz;
   v_effective_status public.caption_variant_status;
 begin
   v_result := public.begin_post_package_mutation(
@@ -401,7 +402,7 @@ begin
   if v_result is not null then return v_result; end if;
   if p_audience not in ('sfl_page', 'sfl_groups', 'personal_groups', 'instagram', 'custom')
     or p_status not in ('draft', 'approved') then raise exception 'Invalid caption variant value'; end if;
-  select base_caption into v_package_base_caption
+  select base_caption, updated_at into v_package_base_caption, v_package_updated_at
   from public.post_packages
   where id = p_package_id and workspace_id = p_workspace_id
     and status in ('draft', 'publishing')
@@ -413,6 +414,9 @@ begin
   ) then raise exception 'Destination override is unavailable'; end if;
 
   if p_variant_id is null then
+    if v_package_updated_at is distinct from p_expected_updated_at then
+      raise exception 'Post package changed since it was last read';
+    end if;
     v_body := coalesce(nullif(trim(p_body), ''), nullif(trim(v_package_base_caption), ''));
     if v_body is null then raise exception 'Caption variant body is required'; end if;
     v_effective_status := p_status::public.caption_variant_status;

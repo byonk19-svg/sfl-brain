@@ -132,13 +132,23 @@ begin
 
   v_variant := public.upsert_post_package_caption_variant(
     v_workspace_a, v_package_id, v_actor_a, 'website', null, null,
-    'sfl_page', null, null, 'draft', null
+    'sfl_page', null, null, 'draft', v_package_updated_at
   );
   v_variant_id := (v_variant->>'id')::uuid;
   v_variant_updated_at := (v_variant->>'updated_at')::timestamptz;
   if v_variant->>'body' <> 'Base caption one' then
     raise exception 'New caption variant did not copy the current base caption';
   end if;
+  begin
+    perform public.upsert_post_package_caption_variant(
+      v_workspace_a, v_package_id, v_actor_a, 'website', null, null,
+      'instagram', null, 'Stale new variant', 'draft',
+      v_package_updated_at - interval '1 second'
+    );
+    raise exception 'Stale caption variant creation was accepted';
+  exception when others then
+    if sqlerrm = 'Stale caption variant creation was accepted' then raise; end if;
+  end;
   begin
     insert into public.posts(
       workspace_id, destination_id, published_at, caption_variant_id
@@ -198,6 +208,16 @@ begin
     raise exception 'Development connector write without request ID was accepted';
   exception when others then
     if sqlerrm = 'Development connector write without request ID was accepted' then raise; end if;
+  end;
+  begin
+    perform public.set_post_package_assets(
+      v_workspace_a, v_package_id, v_actor_b, 'development_tunnel',
+      'e6000000-0000-4000-8000-000000000005', v_package_updated_at,
+      jsonb_build_array()
+    );
+    raise exception 'Non-member development connector actor was accepted';
+  exception when others then
+    if sqlerrm = 'Non-member development connector actor was accepted' then raise; end if;
   end;
   begin
     perform public.set_post_package_assets(
@@ -261,7 +281,7 @@ begin
   begin
     perform public.upsert_post_package_caption_variant(
       v_workspace_a, v_package_id, v_actor_a, 'website', null, null,
-      'custom', v_destination_b, 'Wrong workspace', 'draft', null
+      'custom', v_destination_b, 'Wrong workspace', 'draft', v_package_updated_at
     );
     raise exception 'Cross-workspace destination override was accepted';
   exception when others then
