@@ -152,6 +152,152 @@ describe("PostPackageRepository", () => {
     });
   });
 
+  it("sends the exact RPC contract for every remaining website mutation", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: packageRow(), error: null });
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new PostPackageRepository(client, workspaceId, {
+      userId: actorId,
+      source: "website",
+    });
+    const variantId = "94000000-0000-4000-8000-000000000001";
+    const destinationId = "20000000-0000-4000-8000-000000000001";
+    const assetId = "60000000-0000-4000-8000-000000000007";
+
+    await repository.update({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      base_caption: "Updated caption",
+      working_angle: "Updated angle",
+      notes: "Updated notes",
+    });
+    await repository.upsertVariant({
+      package_id: packageId,
+      variant_id: variantId,
+      expected_updated_at: updatedAt,
+      audience: "custom",
+      destination_id: destinationId,
+      body: "Override caption",
+      status: "approved",
+    });
+    await repository.setAssets({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      assets: [{ asset_id: assetId, role: "hero", position: 0, note: "Lead" }],
+    });
+    await repository.setDestinations({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      destinations: [{
+        id: "93000000-0000-4000-8000-000000000001",
+        destination_id: destinationId,
+        caption_variant_id: variantId,
+      }],
+    });
+    await repository.finish({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      outcome: "abandoned",
+    });
+
+    expect(rpc.mock.calls).toEqual([
+      ["update_post_package", {
+        p_workspace_id: workspaceId,
+        p_package_id: packageId,
+        p_actor_user_id: actorId,
+        p_source: "website",
+        p_request_id: null,
+        p_expected_updated_at: updatedAt,
+        p_base_caption: "Updated caption",
+        p_working_angle: "Updated angle",
+        p_notes: "Updated notes",
+      }],
+      ["upsert_post_package_caption_variant", {
+        p_workspace_id: workspaceId,
+        p_package_id: packageId,
+        p_actor_user_id: actorId,
+        p_source: "website",
+        p_request_id: null,
+        p_variant_id: variantId,
+        p_audience: "custom",
+        p_destination_id: destinationId,
+        p_body: "Override caption",
+        p_status: "approved",
+        p_expected_updated_at: updatedAt,
+      }],
+      ["set_post_package_assets", {
+        p_workspace_id: workspaceId,
+        p_package_id: packageId,
+        p_actor_user_id: actorId,
+        p_source: "website",
+        p_request_id: null,
+        p_expected_updated_at: updatedAt,
+        p_assets: [{ asset_id: assetId, role: "hero", position: 0, note: "Lead" }],
+      }],
+      ["set_post_package_destinations", {
+        p_workspace_id: workspaceId,
+        p_package_id: packageId,
+        p_actor_user_id: actorId,
+        p_source: "website",
+        p_request_id: null,
+        p_expected_updated_at: updatedAt,
+        p_destinations: [{
+          id: "93000000-0000-4000-8000-000000000001",
+          destination_id: destinationId,
+          caption_variant_id: variantId,
+        }],
+      }],
+      ["finish_post_package", {
+        p_workspace_id: workspaceId,
+        p_package_id: packageId,
+        p_actor_user_id: actorId,
+        p_source: "website",
+        p_request_id: null,
+        p_expected_updated_at: updatedAt,
+        p_outcome: "abandoned",
+      }],
+    ]);
+  });
+
+  it("passes development-tunnel request IDs to atomic publication recording", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        id: "70000000-0000-4000-8000-000000000001",
+        post_package_id: packageId,
+        caption_variant_id: "94000000-0000-4000-8000-000000000001",
+        distribution_item_id: "93000000-0000-4000-8000-000000000001",
+        package_updated_at: updatedAt,
+      },
+      error: null,
+    });
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new PostPackageRepository(client, workspaceId, {
+      userId: actorId,
+      source: "development_tunnel",
+    });
+    const publishedAt = "2026-09-15T13:00:00.000Z";
+
+    await repository.recordPost({
+      package_id: packageId,
+      distribution_item_id: "93000000-0000-4000-8000-000000000001",
+      expected_updated_at: updatedAt,
+      request_id: requestId,
+      published_at: publishedAt,
+      notes: "Recorded from local MCP",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("record_post_from_package", {
+      p_workspace_id: workspaceId,
+      p_package_id: packageId,
+      p_distribution_item_id: "93000000-0000-4000-8000-000000000001",
+      p_actor_user_id: actorId,
+      p_source: "development_tunnel",
+      p_request_id: requestId,
+      p_expected_updated_at: updatedAt,
+      p_published_at: publishedAt,
+      p_notes: "Recorded from local MCP",
+    });
+  });
+
   it("rejects missing connector request IDs before an RPC call", async () => {
     const rpc = vi.fn();
     const client = { rpc } as unknown as SupabaseClient;
@@ -164,6 +310,22 @@ describe("PostPackageRepository", () => {
       package_id: packageId,
       expected_updated_at: updatedAt,
       outcome: "abandoned",
+    })).rejects.toThrow(/request ID/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing development-tunnel request IDs before an RPC call", async () => {
+    const rpc = vi.fn();
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new PostPackageRepository(client, workspaceId, {
+      userId: actorId,
+      source: "development_tunnel",
+    });
+
+    await expect(repository.update({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      base_caption: "Updated",
     })).rejects.toThrow(/request ID/i);
     expect(rpc).not.toHaveBeenCalled();
   });

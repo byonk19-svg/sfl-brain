@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
+import { execFileSync } from "node:child_process";
 
 import { createBrainService } from "@/lib/brain";
 import { getServerEnv } from "@/lib/env";
@@ -29,7 +30,10 @@ integration("local Supabase integration", () => {
 
     let opportunityId: string | null = null;
     try {
-      const brain = createBrainService(workspaceId, { userId: actorId, source: "website" });
+      const brain = createBrainService(workspaceId, {
+        userId: actorId,
+        source: "development_tunnel",
+      });
       opportunityId = await brain.createContentOpportunity({
         title: `Package integration ${crypto.randomUUID()}`,
         status: "needs_caption",
@@ -44,6 +48,7 @@ integration("local Supabase integration", () => {
 
       const created = await brain.createPostPackage({
         opportunity_id: opportunityId,
+        request_id: crypto.randomUUID(),
         base_caption: "Package base caption",
         working_angle: "Comparison",
       });
@@ -54,9 +59,21 @@ integration("local Supabase integration", () => {
       expect(active).toMatchObject({ id: created.id, base_caption: "Package base caption" });
       if (!active) throw new Error("Expected an active package");
 
+      await brain.updatePostPackage({
+        package_id: active.id,
+        request_id: crypto.randomUUID(),
+        expected_updated_at: active.updated_at,
+        base_caption: "Updated package base caption",
+        working_angle: "Updated comparison",
+        notes: "Working copy updated through the service",
+      });
+
+      context = await brain.getPostPackageContext(opportunityId);
+
       const variant = await brain.upsertPostPackageVariant({
         package_id: active.id,
-        expected_updated_at: active.updated_at,
+        request_id: crypto.randomUUID(),
+        expected_updated_at: context.active_package!.updated_at,
         audience: "sfl_page",
         body: "Approved package caption",
         status: "approved",
@@ -64,8 +81,24 @@ integration("local Supabase integration", () => {
       expect(variant).toMatchObject({ audience: "sfl_page", status: "approved" });
 
       context = await brain.getPostPackageContext(opportunityId);
+      const override = await brain.upsertPostPackageVariant({
+        package_id: active.id,
+        request_id: crypto.randomUUID(),
+        expected_updated_at: context.active_package!.updated_at,
+        audience: "custom",
+        destination_id: "20000000-0000-4000-8000-000000000001",
+        body: "Exact Facebook Page caption",
+        status: "approved",
+      });
+      expect(override).toMatchObject({
+        destination_id: "20000000-0000-4000-8000-000000000001",
+        status: "approved",
+      });
+
+      context = await brain.getPostPackageContext(opportunityId);
       await brain.setPostPackageAssets({
         package_id: active.id,
+        request_id: crypto.randomUUID(),
         expected_updated_at: context.active_package!.updated_at,
         assets: [{
           asset_id: "60000000-0000-4000-8000-000000000007",
@@ -77,10 +110,11 @@ integration("local Supabase integration", () => {
       context = await brain.getPostPackageContext(opportunityId);
       await brain.setPostPackageDestinations({
         package_id: active.id,
+        request_id: crypto.randomUUID(),
         expected_updated_at: context.active_package!.updated_at,
         destinations: [{
           destination_id: "20000000-0000-4000-8000-000000000001",
-          caption_variant_id: variant.id,
+          caption_variant_id: override.id,
         }],
       });
 
@@ -89,22 +123,58 @@ integration("local Supabase integration", () => {
       await brain.skipPostPackageDestination({
         package_id: active.id,
         distribution_item_id: distribution.id,
+        request_id: crypto.randomUUID(),
         expected_updated_at: context.active_package!.updated_at,
         skip_reason: "Integration verification",
       });
 
       expect((await brain.getPostPackageContext(opportunityId)).active_package).toMatchObject({
+        base_caption: "Updated package base caption",
         assets: [expect.objectContaining({ role: "hero", position: 0 })],
         distribution_items: [expect.objectContaining({ status: "skipped" })],
       });
+
+      context = await brain.getPostPackageContext(opportunityId);
+      await brain.finishPostPackage({
+        package_id: active.id,
+        request_id: crypto.randomUUID(),
+        expected_updated_at: context.active_package!.updated_at,
+        outcome: "abandoned",
+      });
+      context = await brain.getPostPackageContext(opportunityId);
+      expect(context.active_package).toBeNull();
+      expect(context.prior_packages).toEqual([
+        expect.objectContaining({ id: active.id, status: "abandoned" }),
+      ]);
     } finally {
       if (opportunityId) {
-        const deletedOpportunity = await admin
-          .from("content_opportunities")
-          .delete()
-          .eq("id", opportunityId);
-        if (deletedOpportunity.error) throw new Error(deletedOpportunity.error.message);
+        if (!/^[0-9a-f-]{36}$/i.test(opportunityId)) {
+          throw new Error("Unsafe integration cleanup identifier");
+        }
+        execFileSync("docker", [
+          "exec",
+          "supabase_db_sfl-brain",
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          "postgres",
+          "-v",
+          "ON_ERROR_STOP=1",
+          "-c",
+          `set session_replication_role = replica;
+           delete from public.post_package_destinations where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_package_assets where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_package_caption_variants where package_id in (select id from public.post_packages where opportunity_id = '${opportunityId}'::uuid);
+           delete from public.post_packages where opportunity_id = '${opportunityId}'::uuid;
+           delete from public.content_opportunities where id = '${opportunityId}'::uuid;`,
+        ], { stdio: "ignore" });
       }
+      const deletedRequests = await admin
+        .from("mcp_mutation_requests")
+        .delete()
+        .eq("actor_user_id", actorId);
+      if (deletedRequests.error) throw new Error(deletedRequests.error.message);
       const deletedMembership = await admin
         .from("workspace_members")
         .delete()

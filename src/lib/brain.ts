@@ -9,6 +9,7 @@ import {
   type TodayContentFilters,
 } from "@/lib/content-recommendations";
 import { OpportunityRepository } from "@/lib/opportunity-repository";
+import type { MutablePostPackageSource } from "@/lib/post-package";
 import { PostPackageRepository } from "@/lib/post-package-repository";
 import type { CreatePilotOpportunityInput, RecordPilotPostInput, UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 import {
@@ -40,7 +41,7 @@ type JsonRecord = Record<string, unknown>;
 
 export type MutationActor = {
   userId: string;
-  source: "website" | "chatgpt_connector";
+  source: MutablePostPackageSource;
 };
 
 interface ProductGraphRow {
