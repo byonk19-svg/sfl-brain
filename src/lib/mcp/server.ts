@@ -2,6 +2,23 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { createPilotOpportunitySchema, recordPilotPostSchema, updatePilotOpportunitySchema, type CreatePilotOpportunityInput, type RecordPilotPostInput, type UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 import { placeHoldSchema, releaseHoldSchema, updateHoldSchema, type PlaceHoldInput, type ReleaseHoldInput, type UpdateHoldInput } from "@/lib/mcp/hold-schemas";
+import {
+  createPostPackageToolSchema,
+  finishPostPackageToolSchema,
+  setPostPackageAssetsToolSchema,
+  setPostPackageDestinationsToolSchema,
+  skipPostPackageDestinationToolSchema,
+  updatePostPackageToolSchema,
+  upsertPostPackageCaptionVariantToolSchema,
+  type CreatePostPackageToolInput,
+  type FinishPostPackageToolInput,
+  type SetPostPackageAssetsToolInput,
+  type SetPostPackageDestinationsToolInput,
+  type SkipPostPackageDestinationToolInput,
+  type UpdatePostPackageToolInput,
+  type UpsertPostPackageCaptionVariantToolInput,
+} from "@/lib/mcp/post-package-schemas";
+import type { PostPackageContext, PostPackageSummary, PostPackageCaptionVariant } from "@/lib/post-package";
 
 import type {
   TodayContentCandidate,
@@ -17,6 +34,8 @@ export interface BrainReader {
   searchLibrary(query: string, limit: number): Promise<JsonRecord[]>;
   getProductContext(productId: string): Promise<JsonRecord | null>;
   getOpportunityContext(opportunityId: string): Promise<JsonRecord | null>;
+  getPostPackageContext(opportunityId: string): Promise<PostPackageContext>;
+  getPostPackageContextByPackage?(packageId: string): Promise<PostPackageContext>;
   createDevelopmentTestOpportunity?(requestId: string): Promise<string>;
   getAvailableDestinations?(): Promise<JsonRecord[]>;
   createPilotContentOpportunity?(input: CreatePilotOpportunityInput): Promise<JsonRecord>;
@@ -25,6 +44,13 @@ export interface BrainReader {
   placeContentOpportunityOnHold?(input: PlaceHoldInput): Promise<JsonRecord>;
   updateContentOpportunityHold?(input: UpdateHoldInput): Promise<JsonRecord>;
   releaseContentOpportunityHold?(input: ReleaseHoldInput): Promise<JsonRecord>;
+  createPostPackage?(input: CreatePostPackageToolInput): Promise<PostPackageSummary>;
+  updatePostPackage?(input: UpdatePostPackageToolInput): Promise<PostPackageSummary>;
+  upsertPostPackageVariant?(input: UpsertPostPackageCaptionVariantToolInput): Promise<PostPackageCaptionVariant>;
+  setPostPackageAssets?(input: SetPostPackageAssetsToolInput): Promise<PostPackageSummary>;
+  setPostPackageDestinations?(input: SetPostPackageDestinationsToolInput): Promise<PostPackageSummary>;
+  skipPostPackageDestination?(input: SkipPostPackageDestinationToolInput): Promise<PostPackageSummary>;
+  finishPostPackage?(input: Omit<FinishPostPackageToolInput, "action"> & { outcome: "closed" | "abandoned" }): Promise<PostPackageSummary>;
   getRecentPosts(options: {
     days: number;
     productId?: string;
@@ -55,6 +81,46 @@ function sanitize(value: unknown): unknown {
       Object.entries(value)
         .filter(([key]) => !["storage_path", "SUPABASE_SERVICE_ROLE_KEY"].includes(key))
         .map(([key, child]) => [key, sanitize(child)]),
+    );
+  }
+  return value;
+}
+
+const internalPackageKeys = new Set([
+  "storage_path",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "workspace_id",
+  "actor_user_id",
+  "created_by",
+  "updated_by",
+  "approved_by",
+]);
+
+function isTrustedSignedAssetUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const local = (url.hostname === "127.0.0.1" || url.hostname === "localhost") && url.protocol === "http:";
+    const hosted = url.protocol === "https:" && url.hostname.endsWith(".supabase.co");
+    return (local || hosted) && url.pathname.includes("/storage/v1/object/sign/");
+  } catch {
+    return false;
+  }
+}
+
+function sanitizePostPackage(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizePostPackage);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, child]) => {
+        if (
+          internalPackageKeys.has(key) ||
+          /(^|_)(access_token|refresh_token|password|credential|secret|api_key|private_key)$/i.test(key)
+        ) return [];
+        if (key === "signed_url" && typeof child === "string" && !isTrustedSignedAssetUrl(child)) {
+          return [[key, null]];
+        }
+        return [[key, sanitizePostPackage(child)]];
+      }),
     );
   }
   return value;
@@ -156,8 +222,36 @@ export function createSflMcpServer(
     try { return success("opportunities", await reader.searchOnHoldOpportunities?.(query, limit) ?? [], "On-hold content opportunities."); } catch (error) { return failure(error); }
   });
 
+  server.registerTool("get_post_package_context", {
+    title: "Get Post Package Context",
+    description: "Read the active Post Package and prior package history for one verified content opportunity before proposing or confirming any package change.",
+    inputSchema: z.object({ opportunity_id: z.uuid() }),
+    annotations: readOnlyAnnotations,
+  }, async ({ opportunity_id }) => {
+    try {
+      return success(
+        "post_package_context",
+        sanitizePostPackage(await reader.getPostPackageContext(opportunity_id)),
+        "Current Post Package context.",
+      );
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
   if (options.enablePilotWrites) {
     const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
+    const rereadPackage = async (packageId: string) => {
+      if (!reader.getPostPackageContextByPackage) {
+        throw new Error("Post Package lookup is not configured");
+      }
+      const context = await reader.getPostPackageContextByPackage(packageId);
+      const packages = [context.active_package, ...context.prior_packages].filter(Boolean);
+      if (!packages.some((item) => item?.id === packageId)) {
+        throw new Error("Saved Post Package could not be verified in fresh context");
+      }
+      return sanitizePostPackage(context);
+    };
     server.registerTool("create_content_opportunity", { title: "Save Content Idea", description: "Save a real content idea. Use only when the user asks to save it; products, links, and assets are optional.", inputSchema: createPilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
       try { if (!reader.createPilotContentOpportunity) return unavailable("Create content opportunity"); const result = await reader.createPilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, saved_state: sanitize(saved) }, "Content idea saved."); } catch (error) { return failure(error); }
     });
@@ -170,6 +264,91 @@ export function createSflMcpServer(
     server.registerTool("place_content_opportunity_on_hold", { title: "Put Content On Hold", description: "Put a verified opportunity on hold only after the user confirms the reason and release condition.", inputSchema: placeHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.placeContentOpportunityOnHold) return unavailable("Place hold"); const hold = await reader.placeContentOpportunityOnHold(args); return success("hold", hold, "Content opportunity moved to On hold."); } catch (error) { return failure(error); } });
     server.registerTool("update_content_opportunity_hold", { title: "Update Content Hold", description: "Update the current hold after an explicit user request and fresh read.", inputSchema: updateHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.updateContentOpportunityHold) return unavailable("Update hold"); return success("hold", await reader.updateContentOpportunityHold(args), "Hold details updated."); } catch (error) { return failure(error); } });
     server.registerTool("release_content_opportunity_hold", { title: "Return Content To Backlog", description: "Manually release the current hold only after the user confirms.", inputSchema: releaseHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.releaseContentOpportunityHold) return unavailable("Release hold"); return success("hold", await reader.releaseContentOpportunityHold(args), "Content opportunity returned to the active backlog."); } catch (error) { return failure(error); } });
+    server.registerTool("create_post_package", {
+      title: "Start Post Package",
+      description: "Start a Post Package only after an explicit workspace-member request and a fresh get_post_package_context read confirms there is no active package.",
+      inputSchema: createPostPackageToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.createPostPackage) return unavailable("Create Post Package");
+        const saved = await reader.createPostPackage(args);
+        const context = await reader.getPostPackageContext(saved.opportunity_id);
+        return success("post_package_context", sanitizePostPackage(context), "Post Package started and re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("update_post_package", {
+      title: "Update Post Package",
+      description: "Update package copy or working context only after an explicit workspace-member request and a fresh package read; supply the latest updated_at.",
+      inputSchema: updatePostPackageToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.updatePostPackage) return unavailable("Update Post Package");
+        await reader.updatePostPackage(args);
+        return success("post_package_context", await rereadPackage(args.package_id), "Post Package updated and re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("upsert_post_package_caption_variant", {
+      title: "Save Post Package Caption Variant",
+      description: "Create or update one caption variant only after an explicit workspace-member request and a fresh package read; supply the latest package or variant updated_at.",
+      inputSchema: upsertPostPackageCaptionVariantToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.upsertPostPackageVariant) return unavailable("Save Post Package caption variant");
+        await reader.upsertPostPackageVariant(args);
+        return success("post_package_context", await rereadPackage(args.package_id), "Caption variant saved and package re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("set_post_package_assets", {
+      title: "Set Post Package Assets",
+      description: "Replace the exact ordered package asset selection only after an explicit workspace-member request and a fresh package read; supply the latest updated_at.",
+      inputSchema: setPostPackageAssetsToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.setPostPackageAssets) return unavailable("Set Post Package assets");
+        await reader.setPostPackageAssets(args);
+        return success("post_package_context", await rereadPackage(args.package_id), "Package assets saved and package re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("set_post_package_destinations", {
+      title: "Set Post Package Destinations",
+      description: "Replace the exact destination-to-approved-caption plan only after an explicit workspace-member request and a fresh package read; supply the latest updated_at.",
+      inputSchema: setPostPackageDestinationsToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.setPostPackageDestinations) return unavailable("Set Post Package destinations");
+        await reader.setPostPackageDestinations(args);
+        return success("post_package_context", await rereadPackage(args.package_id), "Distribution plan saved and package re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("skip_post_package_destination", {
+      title: "Skip Post Package Destination",
+      description: "Skip one planned destination with a reason only after an explicit workspace-member request and a fresh package read; supply the latest updated_at.",
+      inputSchema: skipPostPackageDestinationToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async (args) => {
+      try {
+        if (!reader.skipPostPackageDestination) return unavailable("Skip Post Package destination");
+        await reader.skipPostPackageDestination(args);
+        return success("post_package_context", await rereadPackage(args.package_id), "Destination skipped and package re-read.");
+      } catch (error) { return failure(error); }
+    });
+    server.registerTool("finish_post_package", {
+      title: "Finish Post Package",
+      description: "Close or abandon a package only after an explicit workspace-member request and a fresh package read confirms the chosen finish action is valid; supply the latest updated_at.",
+      inputSchema: finishPostPackageToolSchema,
+      annotations: developmentWriteAnnotations,
+    }, async ({ action, ...args }) => {
+      try {
+        if (!reader.finishPostPackage) return unavailable("Finish Post Package");
+        await reader.finishPostPackage({ ...args, outcome: action === "close" ? "closed" : "abandoned" });
+        return success("post_package_context", await rereadPackage(args.package_id), "Post Package finished and re-read.");
+      } catch (error) { return failure(error); }
+    });
   }
 
   server.registerTool(

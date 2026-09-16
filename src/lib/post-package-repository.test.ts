@@ -64,6 +64,27 @@ function queryClient(rows: unknown[]) {
 }
 
 describe("PostPackageRepository", () => {
+  it("resolves package context through a workspace-scoped package lookup", async () => {
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.select = vi.fn(() => lookup);
+    lookup.eq = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({ data: { opportunity_id: opportunityId }, error: null });
+    const graph: Record<string, ReturnType<typeof vi.fn>> = {};
+    graph.select = vi.fn(() => graph);
+    graph.eq = vi.fn(() => graph);
+    graph.order = vi.fn().mockResolvedValue({ data: [packageRow({ post_package_assets: [] })], error: null });
+    const from = vi.fn()
+      .mockReturnValueOnce(lookup)
+      .mockReturnValueOnce(graph);
+    const client = { from } as unknown as SupabaseClient;
+
+    const result = await new PostPackageRepository(client, workspaceId).contextByPackage(packageId);
+
+    expect(lookup.eq).toHaveBeenNthCalledWith(1, "workspace_id", workspaceId);
+    expect(lookup.eq).toHaveBeenNthCalledWith(2, "id", packageId);
+    expect(result).toMatchObject({ opportunity_id: opportunityId, active_package: { id: packageId } });
+  });
+
   it("loads one active package and terminal package summaries", async () => {
     const closed = packageRow({
       id: "91000000-0000-4000-8000-000000000002",

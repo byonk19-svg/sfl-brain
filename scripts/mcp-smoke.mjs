@@ -54,6 +54,26 @@ try {
   if (JSON.stringify(opportunity.structuredContent).includes("storage_path")) {
     throw new Error("Content opportunity context exposed a private storage path");
   }
+  const postPackage = await client.callTool({
+    name: "get_post_package_context",
+    arguments: { opportunity_id: first.opportunity_id },
+  });
+  if (postPackage.isError || !postPackage.structuredContent?.post_package_context) {
+    throw new Error("get_post_package_context did not return structured package context");
+  }
+  const serializedPackage = JSON.stringify(postPackage.structuredContent);
+  if (/storage_path|created_by|updated_by|approved_by|SUPABASE_SERVICE_ROLE_KEY/.test(serializedPackage)) {
+    throw new Error("Post Package context exposed private storage or internal actor data");
+  }
+  for (const match of serializedPackage.matchAll(/"signed_url":"([^"]+)"/g)) {
+    if (match[1] === "null") continue;
+    const signed = new URL(match[1]);
+    const local = ["127.0.0.1", "localhost"].includes(signed.hostname) && signed.protocol === "http:";
+    const hosted = signed.protocol === "https:" && signed.hostname.endsWith(".supabase.co");
+    if ((!local && !hosted) || !signed.pathname.includes("/storage/v1/object/sign/")) {
+      throw new Error("Post Package context exposed an untrusted signed asset URL");
+    }
+  }
   const search = await client.callTool({
     name: "search_sfl_library",
     arguments: { query: "chair", limit: 10 },
@@ -93,6 +113,7 @@ try {
   console.log(`Top opportunity: ${first.title}`);
   console.log(`Product context: ${product.structuredContent.product.name}`);
   console.log(`Opportunity context: ${opportunity.structuredContent.opportunity.title}`);
+  console.log(`Post Package context: ${postPackage.structuredContent.post_package_context.active_package ? "active" : "no active package"}`);
   console.log(`Opportunity matches: ${search.structuredContent.opportunities.length}`);
   console.log(`Product matches: ${search.structuredContent.products.length}`);
   console.log(`Recent posts: ${recent.structuredContent.posts.length}`);

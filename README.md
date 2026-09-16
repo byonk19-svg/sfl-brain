@@ -36,7 +36,7 @@ Stages are Idea, Needs assets, Needs links, Needs caption, Ready, Posted, and Re
 - `/opportunities/[id]` — stage, next action, products, links, assets, destination history, and reversible archive state
 - `/products/[id]` — product/listing/link/asset/Radar facts plus related opportunities
 - `/record-post` — one publication to one destination, attached to one content opportunity
-- `/mcp` — stateless Streamable HTTP MCP endpoint with eight reads and six confirmed, non-destructive writes when hosted
+- `/mcp` — stateless Streamable HTTP MCP endpoint with nine reads and thirteen confirmed, non-destructive writes when hosted
 
 Retailer scraping, stock monitoring, publishing integrations, AI tagging, OCR, notifications, destructive MCP actions, and full website write parity remain out of scope.
 
@@ -104,11 +104,12 @@ Posted content is excluded from ordinary Today results. It returns only when a R
 
 ## MCP tools
 
-The eight read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
+The nine read tools carry `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`:
 
 - `get_today_candidates` — opportunity-centered recommendations
 - `get_available_destinations` — lists active destinations before recording a publication
 - `get_on_hold_opportunities` — lists retained ideas in manual review order
+- `get_post_package_context` — reads the active versioned Post Package and prior package history for an opportunity
 - `search_sfl_library` — searches opportunities and underlying products together
 - `get_product_context` — includes related content opportunities
 - `get_content_opportunity_context` — returns the complete sanitized opportunity context
@@ -120,6 +121,8 @@ Every successful call returns readable text and `structuredContent`. Raw Storage
 The hosted connector additionally exposes three non-destructive write tools: `create_content_opportunity`, `update_content_opportunity`, and `record_post`. ChatGPT presents these as writes and requires user confirmation. Each call is idempotent, checks current workspace membership, and records the authenticated actor plus `chatgpt_connector` source without storing conversation text.
 
 It also exposes confirmed hold management: `place_content_opportunity_on_hold`, `update_content_opportunity_hold`, and `release_content_opportunity_hold`. Holds remain manual; the connector does not monitor release conditions or send automatic notifications.
+
+The hosted connector also exposes seven confirmed Post Package writes: `create_post_package`, `update_post_package`, `upsert_post_package_caption_variant`, `set_post_package_assets`, `set_post_package_destinations`, `skip_post_package_destination`, and `finish_post_package`. Each requires an explicit member request, a unique request ID, and—after creation—the latest saved `updated_at`; successful calls re-read and return sanitized package state. ChatGPT can select already-uploaded website assets by ID, but this connector does not accept or upload binary attachments. Asset links are short-lived signed links from the trusted SFL storage service.
 
 For production, connect ChatGPT directly to the deployed `https://YOUR_DOMAIN/mcp` endpoint using OAuth. In Supabase Authentication → OAuth Server, enable OAuth 2.1, set the authorization path to `/oauth/consent`, enable dynamic client registration, and retain disabled public signup. The production connector then works independently of this computer.
 

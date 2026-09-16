@@ -243,6 +243,10 @@ export class BrainService {
     return this.postPackageRepository().context(opportunityId);
   }
 
+  async getPostPackageContextByPackage(packageId: string) {
+    return this.postPackageRepository().contextByPackage(packageId);
+  }
+
   async createPostPackage(input: z.infer<typeof createPostPackageSchema>) {
     return this.postPackageRepository().create(input);
   }

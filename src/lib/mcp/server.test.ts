@@ -37,6 +37,7 @@ describe("SFL Brain MCP server", () => {
       searchLibrary: async () => [{ id: candidate.product_summary[0].id, name: candidate.product_summary[0].name }],
       getProductContext: async (id) => ({ id, name: candidate.product_summary[0].name, assets: [{ id: "asset", title: "Chair photo" }] }),
       getOpportunityContext: async (id) => ({ id, title: candidate.title, content_type: candidate.content_type, content_opportunity_assets: [{ assets: { id: "asset", storage_path: "private/chair.jpg", signed_url: "https://example.test/signed" } }] }),
+      getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
       getRecentPosts: async () => [{ id: "post", published_at: "2026-09-01T12:00:00Z" }],
       getRevivalEvents: async () => [{ id: "event", event_type: "restock", product: { id: candidate.product_summary[0].id, name: candidate.product_summary[0].name } }],
     };
@@ -52,13 +53,14 @@ describe("SFL Brain MCP server", () => {
     await server.close();
   });
 
-  it("registers the existing six read-only tools plus destination lookup", async () => {
+  it("registers the nine read-only tools locally", async () => {
     const listed = await client.listTools();
 
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "get_today_candidates",
       "get_available_destinations",
       "get_on_hold_opportunities",
+      "get_post_package_context",
       "search_sfl_library",
       "get_product_context",
       "get_content_opportunity_context",
@@ -70,13 +72,14 @@ describe("SFL Brain MCP server", () => {
     }
   });
 
-  it("adds only the three approved conversational writes when enabled", async () => {
+  it("adds the approved conversational writes only when enabled", async () => {
     const reader: BrainReader = {
       getTodayCandidates: async () => [],
       searchContentBacklog: async () => [],
       searchLibrary: async () => [],
       getProductContext: async () => null,
       getOpportunityContext: async () => null,
+      getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
       getRecentPosts: async () => [],
       getRevivalEvents: async () => [],
     };
@@ -92,12 +95,20 @@ describe("SFL Brain MCP server", () => {
         "get_today_candidates",
       "get_available_destinations",
       "get_on_hold_opportunities",
+      "get_post_package_context",
         "create_content_opportunity",
         "update_content_opportunity",
       "record_post",
       "place_content_opportunity_on_hold",
       "update_content_opportunity_hold",
       "release_content_opportunity_hold",
+      "create_post_package",
+      "update_post_package",
+      "upsert_post_package_caption_variant",
+      "set_post_package_assets",
+      "set_post_package_destinations",
+      "skip_post_package_destination",
+      "finish_post_package",
         "search_sfl_library",
         "get_product_context",
         "get_content_opportunity_context",
@@ -111,8 +122,80 @@ describe("SFL Brain MCP server", () => {
         "place_content_opportunity_on_hold",
         "update_content_opportunity_hold",
         "release_content_opportunity_hold",
+        "create_post_package",
+        "update_post_package",
+        "upsert_post_package_caption_variant",
+        "set_post_package_assets",
+        "set_post_package_destinations",
+        "skip_post_package_destination",
+        "finish_post_package",
       ]);
       expect(tools.map((tool) => tool.name)).not.toContain("create_development_test_opportunity");
+    } finally {
+      await hostedClient.close();
+      await hostedServer.close();
+    }
+  });
+
+  it("re-reads and sanitizes saved package state after a confirmed write", async () => {
+    const calls: string[] = [];
+    const opportunityId = candidate.opportunity_id;
+    const packageId = "a0000000-0000-4000-8000-000000000003";
+    const reader: BrainReader = {
+      getTodayCandidates: async () => [],
+      searchContentBacklog: async () => [],
+      searchLibrary: async () => [],
+      getProductContext: async () => null,
+      getOpportunityContext: async () => null,
+      getPostPackageContext: async (id) => {
+        calls.push(`read:${id}`);
+        return {
+          opportunity_id: id,
+          active_package: {
+            id: packageId,
+            storage_path: "private/secret.jpg",
+            created_by: "internal-user-id",
+            access_token: "credential-must-not-leak",
+            assets: [
+              { asset: { signed_url: "https://project.supabase.co/storage/v1/object/sign/sfl-assets/good" } },
+              { asset: { signed_url: "https://evil.example/steal" } },
+            ],
+          },
+          prior_packages: [],
+        } as never;
+      },
+      getRecentPosts: async () => [],
+      getRevivalEvents: async () => [],
+      createPostPackage: async () => {
+        calls.push("write");
+        return { id: packageId, opportunity_id: opportunityId } as never;
+      },
+    };
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const hostedClient = new Client({ name: "package-write-client", version: "1.0.0" });
+    const hostedServer = createSflMcpServer(reader, { enablePilotWrites: true });
+    await hostedServer.connect(serverTransport);
+    await hostedClient.connect(clientTransport);
+
+    try {
+      const result = await hostedClient.callTool({
+        name: "create_post_package",
+        arguments: {
+          request_id: "a0000000-0000-4000-8000-000000000001",
+          opportunity_id: opportunityId,
+          base_caption: "Caption",
+        },
+      });
+      expect(calls).toEqual(["write", `read:${opportunityId}`]);
+      expect(result.structuredContent).toMatchObject({
+        post_package_context: { opportunity_id: opportunityId },
+      });
+      const serialized = JSON.stringify(result.structuredContent);
+      expect(serialized).not.toContain("storage_path");
+      expect(serialized).not.toContain("created_by");
+      expect(serialized).not.toContain("credential-must-not-leak");
+      expect(serialized).not.toContain("evil.example");
+      expect(serialized).toContain("project.supabase.co");
     } finally {
       await hostedClient.close();
       await hostedServer.close();
@@ -189,6 +272,7 @@ describe("SFL Brain MCP server", () => {
       searchLibrary: async () => [],
       getProductContext: async () => null,
       getOpportunityContext: async () => null,
+      getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
       getRecentPosts: async () => [],
       getRevivalEvents: async () => [],
       createDevelopmentTestOpportunity: async () => {

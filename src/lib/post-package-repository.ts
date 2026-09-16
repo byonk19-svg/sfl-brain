@@ -215,6 +215,17 @@ export class PostPackageRepository {
     };
   }
 
+  async contextByPackage(packageId: string): Promise<PostPackageContext> {
+    const result = await this.client
+      .from("post_packages")
+      .select("opportunity_id")
+      .eq("workspace_id", this.workspaceId)
+      .eq("id", packageId)
+      .maybeSingle();
+    const row = assertResult(result, "Load post package opportunity") as { opportunity_id: string };
+    return this.context(row.opportunity_id);
+  }
+
   async create(input: z.infer<typeof createPostPackageSchema>): Promise<PostPackageSummary> {
     const result = await this.client.rpc("create_post_package", {
       p_workspace_id: this.workspaceId,
