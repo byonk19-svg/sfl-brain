@@ -103,4 +103,52 @@ describe("audited conversational writes", () => {
       p_source: "chatgpt_connector",
     }));
   });
+
+  it("passes connector request, actor, and optimistic context to package writes", async () => {
+    const { brain, rpc } = service();
+    const packageId = "a0000000-0000-4000-8000-000000000004";
+    const variantId = "a0000000-0000-4000-8000-000000000005";
+    const assetId = "a0000000-0000-4000-8000-000000000006";
+    const distributionItemId = "a0000000-0000-4000-8000-000000000007";
+    const updatedAt = "2026-09-16T12:00:00.000Z";
+    await brain.createPostPackage({ request_id: requestId, opportunity_id: opportunityId });
+    await brain.updatePostPackage({ request_id: requestId, package_id: packageId, expected_updated_at: updatedAt, base_caption: "Caption", working_angle: null, notes: null });
+    await brain.upsertPostPackageVariant({ request_id: requestId, package_id: packageId, expected_updated_at: updatedAt, audience: "sfl_page", body: "Caption", status: "approved" });
+    await brain.setPostPackageAssets({ request_id: requestId, package_id: packageId, expected_updated_at: updatedAt, assets: [{ asset_id: assetId, role: "hero", position: 0 }] });
+    await brain.setPostPackageDestinations({ request_id: requestId, package_id: packageId, expected_updated_at: updatedAt, destinations: [{ destination_id: destinationId, caption_variant_id: variantId }] });
+    await brain.skipPostPackageDestination({ request_id: requestId, package_id: packageId, distribution_item_id: distributionItemId, expected_updated_at: updatedAt, skip_reason: "Not relevant today" });
+    await brain.finishPostPackage({ request_id: requestId, package_id: packageId, expected_updated_at: updatedAt, outcome: "closed" });
+
+    expect(rpc).toHaveBeenNthCalledWith(1, "create_post_package", expect.objectContaining({
+      p_request_id: requestId,
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(2, "update_post_package", expect.objectContaining({
+      p_expected_updated_at: updatedAt,
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(3, "upsert_post_package_caption_variant", expect.objectContaining({
+      p_request_id: requestId,
+      p_actor_user_id: "user-a",
+      p_source: "chatgpt_connector",
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(4, "set_post_package_assets", expect.objectContaining({
+      p_request_id: requestId,
+      p_expected_updated_at: updatedAt,
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(5, "set_post_package_destinations", expect.objectContaining({
+      p_request_id: requestId,
+      p_expected_updated_at: updatedAt,
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(6, "skip_post_package_destination", expect.objectContaining({
+      p_request_id: requestId,
+      p_distribution_item_id: distributionItemId,
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(7, "finish_post_package", expect.objectContaining({
+      p_outcome: "closed",
+      p_request_id: requestId,
+    }));
+  });
 });

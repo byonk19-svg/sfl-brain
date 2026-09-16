@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element -- Private signed previews use short-lived hosts outside Next Image configuration. */
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -7,7 +8,15 @@ import {
   detachOpportunityAssetAction,
   detachOpportunityProductAction,
   editContentOpportunityAction,
+  createPostPackageAction,
+  finishPostPackageAction,
+  setPostPackageAssetsAction,
+  setPostPackageDestinationsAction,
+  skipPostPackageDestinationAction,
   setOpportunityArchivedAction,
+  updatePostPackageAction,
+  upsertPostPackageVariantAction,
+  uploadPostPackageAssetAction,
   uploadOpportunityAssetAction,
 } from "@/app/actions";
 import { Notice, SetupNotice } from "@/components/notice";
@@ -15,6 +24,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { CopyButton } from "@/components/copy-button";
 import { OpportunityHoldForm } from "@/components/opportunity-hold-form";
 import { OpportunityHoldSummary } from "@/components/opportunity-hold-summary";
+import { PostPackageWorkspace } from "@/components/post-package-workspace";
 import { createWebsiteBrainService } from "@/lib/website-auth";
 import { formatDateTime, formatMoney, humanize } from "@/lib/format";
 
@@ -46,11 +56,13 @@ export default async function OpportunityPage({
   const query = await searchParams;
   let opportunity: RecordValue | null;
   let options;
+  let packageContext;
   try {
     const brain = await createWebsiteBrainService();
-    [opportunity, options] = await Promise.all([
+    [opportunity, options, packageContext] = await Promise.all([
       brain.getOpportunityContext(id),
       brain.getFormOptions(),
+      brain.getPostPackageContext(id),
     ]);
   } catch (error) {
     return <div className="page-shell"><SetupNotice message={error instanceof Error ? error.message : "Content opportunity could not load."} /></div>;
@@ -85,6 +97,25 @@ export default async function OpportunityPage({
         <div className="header-actions"><Link className="button" href={`/record-post?opportunity=${id}`}>Record post</Link><a className="button button-quiet" href="#edit-opportunity">Edit</a><form action={setOpportunityArchivedAction}><input type="hidden" name="opportunity_id" value={id} /><input type="hidden" name="archived" value={opportunity.archived_at ? "false" : "true"} /><button className="text-button header-text-button" type="submit">{opportunity.archived_at ? "Restore" : "Archive"}</button></form></div>
       </header>
       <Notice success={success} error={error} />
+
+      <PostPackageWorkspace
+        context={packageContext}
+        destinations={options.destinations}
+        opportunityAssets={assetJoins.map((join) => {
+          const asset = record(join.assets);
+          return { id: text(asset.id), title: text(asset.title) || null, asset_type: text(asset.asset_type), signed_url: text(asset.signed_url) || null };
+        })}
+        actions={{
+          startPackage: createPostPackageAction,
+          updatePackage: updatePostPackageAction,
+          saveVariant: upsertPostPackageVariantAction,
+          saveAssets: setPostPackageAssetsAction,
+          uploadAsset: uploadPostPackageAssetAction,
+          savePlan: setPostPackageDestinationsAction,
+          skipDestination: skipPostPackageDestinationAction,
+          finishPackage: finishPostPackageAction,
+        }}
+      />
 
       <section className={`detail-section hold-panel${currentHold ? " is-held" : ""}`}>
         <div className="section-heading"><span>H</span><h2>{currentHold ? "On hold" : "Attention status"}</h2></div>

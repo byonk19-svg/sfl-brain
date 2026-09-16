@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  CAPTION_AUDIENCES,
+  CAPTION_VARIANT_STATUSES,
+  PACKAGE_ASSET_ROLES,
+} from "@/lib/post-package";
+
 const optionalText = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().trim().max(2_000).optional(),
@@ -210,6 +216,11 @@ export const radarEventSchema = z.object({
   source: optionalText,
 });
 
+const explicitPublicationInstant = z.string().min(1).refine(
+  (value) => z.string().datetime({ offset: true }).safeParse(value).success,
+  "Enter a valid publication date with a timezone",
+).transform((value) => new Date(value).toISOString());
+
 export const recordPostSchema = z.object({
   content_opportunity_id: z.uuid({
     error: "Choose a content opportunity",
@@ -217,7 +228,7 @@ export const recordPostSchema = z.object({
   destination_id: z.uuid(),
   product_ids: z.array(z.uuid()).default([]),
   asset_ids: z.array(z.uuid()).default([]),
-  published_at: z.string().min(1).transform((value) => new Date(value).toISOString()),
+  published_at: explicitPublicationInstant,
   caption: optionalText,
   angle: optionalText,
   performance_label: z.enum(["unknown", "weak", "normal", "winner"]).default("unknown"),
@@ -244,6 +255,154 @@ export const releaseOpportunityHoldSchema = z.object({
   expected_updated_at: z.iso.datetime({ offset: true }),
   release_note: optionalText,
 });
+
+const optimisticUpdatedAt = z.iso.datetime({ offset: true });
+const nullableBoundedText = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().max(10_000).optional(),
+);
+
+export const createPostPackageSchema = z.object({
+  opportunity_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  base_caption: nullableBoundedText,
+  working_angle: optionalText,
+  notes: optionalText,
+});
+
+export const updatePostPackageSchema = z.object({
+  package_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  base_caption: z.string().trim().min(1).max(10_000).nullable(),
+  working_angle: z.string().trim().min(1).max(2_000).nullable(),
+  notes: z.string().trim().min(1).max(2_000).nullable(),
+});
+
+export const postPackageVariantSchema = z.object({
+  package_id: z.uuid(),
+  variant_id: z.uuid().nullish(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  audience: z.enum(CAPTION_AUDIENCES),
+  destination_id: z.uuid().nullish(),
+  body: z.string().trim().min(1, "Caption body is required").max(10_000),
+  status: z.enum(CAPTION_VARIANT_STATUSES).default("draft"),
+});
+
+export const packageAssetSelectionSchema = z
+  .array(z.object({
+    asset_id: z.uuid(),
+    role: z.enum(PACKAGE_ASSET_ROLES).default("supporting"),
+    position: z.number().int().min(0).max(99),
+    note: optionalText,
+  }))
+  .max(100)
+  .superRefine((assets, context) => {
+    if (assets.filter((asset) => asset.role === "hero").length > 1) {
+      context.addIssue({ code: "custom", message: "Only one hero asset is allowed" });
+    }
+    if (new Set(assets.map((asset) => asset.asset_id)).size !== assets.length) {
+      context.addIssue({ code: "custom", message: "Each asset may be selected only once" });
+    }
+    if (new Set(assets.map((asset) => asset.position)).size !== assets.length) {
+      context.addIssue({ code: "custom", message: "Asset positions must be unique" });
+    }
+  });
+
+export const setPostPackageAssetsSchema = z.object({
+  package_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  assets: packageAssetSelectionSchema,
+});
+
+export const distributionPlanSchema = z
+  .array(z.object({
+    id: z.uuid().optional(),
+    destination_id: z.uuid(),
+    caption_variant_id: z.uuid(),
+  }))
+  .max(100)
+  .superRefine((items, context) => {
+    if (new Set(items.map((item) => item.destination_id)).size !== items.length) {
+      context.addIssue({ code: "custom", message: "Distribution destinations must be unique" });
+    }
+  });
+
+export const setPostPackageDestinationsSchema = z.object({
+  package_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  destinations: distributionPlanSchema,
+});
+
+export const skipPostPackageDestinationSchema = z.object({
+  package_id: z.uuid(),
+  distribution_item_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  skip_reason: z.string().trim().min(1, "Skip reason is required").max(2_000),
+});
+
+export const finishPostPackageSchema = z.object({
+  package_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  outcome: z.enum(["closed", "abandoned"]),
+});
+
+export const recordPostFromPackageSchema = z.object({
+  package_id: z.uuid(),
+  distribution_item_id: z.uuid(),
+  request_id: z.uuid().nullish(),
+  expected_updated_at: optimisticUpdatedAt,
+  published_at: explicitPublicationInstant,
+  notes: optionalText,
+});
+
+const packagePublicationOverrideMessage =
+  "Package publications use the approved caption, destination, products, and ordered assets from the package";
+
+export const recordPostFromPackageWebsiteSchema = recordPostFromPackageSchema.extend({
+  opportunity_id: z.uuid(),
+  caption_override: z.unknown().optional(),
+  angle_override: z.unknown().optional(),
+  destination_override: z.unknown().optional(),
+  product_override_ids: z.array(z.unknown()).optional(),
+  asset_override_ids: z.array(z.unknown()).optional(),
+}).superRefine((input, context) => {
+  if (
+    input.caption_override !== undefined
+    || input.angle_override !== undefined
+    || input.destination_override !== undefined
+    || input.product_override_ids !== undefined
+    || input.asset_override_ids !== undefined
+  ) {
+    context.addIssue({ code: "custom", message: packagePublicationOverrideMessage });
+  }
+});
+
+export const createDestinationSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  platform: z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    z.enum([
+      "facebook_page",
+      "facebook_group",
+      "facebook_personal",
+      "instagram_feed",
+      "instagram_reel",
+      "instagram_story",
+      "other",
+    ]),
+  ),
+  posting_identity: z.string().trim().min(1).max(200),
+  notes: optionalText,
+  is_active: z.boolean().default(true),
+});
+
+export const updateDestinationSchema = createDestinationSchema.extend({ id: z.uuid() });
 
 export const ALLOWED_UPLOAD_TYPES = [
   "image/jpeg",

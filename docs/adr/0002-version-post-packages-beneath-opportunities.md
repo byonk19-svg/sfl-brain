@@ -1,0 +1,3 @@
+# Version Post Packages beneath Content Opportunities
+
+Each Content Opportunity owns a sequence of Post Packages, with at most one active package at a time. A package represents one publishing cycle and becomes preserved after it is Closed or Abandoned; a revival starts a new package rather than reopening or overwriting the old one. Publications snapshot the exact approved copy and ordered assets they used. This keeps the opportunity as the durable editorial idea while preserving every concrete execution, avoids duplicating underlying asset files, and prevents later caption or creative edits from rewriting publication history.

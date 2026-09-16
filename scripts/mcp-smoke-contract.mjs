@@ -2,6 +2,7 @@ const localToolNames = [
   "get_today_candidates",
   "get_available_destinations",
   "get_on_hold_opportunities",
+  "get_post_package_context",
   "search_sfl_library",
   "get_product_context",
   "get_content_opportunity_context",
@@ -16,12 +17,19 @@ const hostedWriteNames = [
   "place_content_opportunity_on_hold",
   "update_content_opportunity_hold",
   "release_content_opportunity_hold",
+  "create_post_package",
+  "update_post_package",
+  "upsert_post_package_caption_variant",
+  "set_post_package_assets",
+  "set_post_package_destinations",
+  "skip_post_package_destination",
+  "finish_post_package",
 ];
 
 /** @param {"local" | "hosted"} mode */
 export function expectedToolNames(mode) {
   return mode === "hosted"
-    ? [...localToolNames.slice(0, 3), ...hostedWriteNames, ...localToolNames.slice(3)]
+    ? [...localToolNames.slice(0, 4), ...hostedWriteNames, ...localToolNames.slice(4)]
     : [...localToolNames];
 }
 

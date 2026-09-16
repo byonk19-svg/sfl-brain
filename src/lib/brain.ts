@@ -9,29 +9,50 @@ import {
   type TodayContentFilters,
 } from "@/lib/content-recommendations";
 import { OpportunityRepository } from "@/lib/opportunity-repository";
+import type { MutablePostPackageSource } from "@/lib/post-package";
+import { PostPackageRepository } from "@/lib/post-package-repository";
 import type { CreatePilotOpportunityInput, RecordPilotPostInput, UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 import {
   type RecommendationInput,
 } from "@/lib/recommendations";
 import type {
   affiliateLinkSchema,
+  createPostPackageSchema,
+  createDestinationSchema,
   createOpportunitySchema,
   createProductSchema,
   editOpportunitySchema,
   editProductSchema,
+  finishPostPackageSchema,
   listingSchema,
   opportunityAssetSchema,
   opportunityProductSchema,
+  postPackageVariantSchema,
   radarEventSchema,
+  recordPostFromPackageSchema,
   recordPostSchema,
+  setPostPackageAssetsSchema,
+  setPostPackageDestinationsSchema,
+  skipPostPackageDestinationSchema,
+  updatePostPackageSchema,
+  updateDestinationSchema,
 } from "@/lib/validation";
 import { validateUpload } from "@/lib/validation";
 
 type JsonRecord = Record<string, unknown>;
+export type DestinationRecord = {
+  id: string;
+  name: string;
+  platform: string;
+  posting_identity: string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+};
 
 export type MutationActor = {
   userId: string;
-  source: "website" | "chatgpt_connector";
+  source: MutablePostPackageSource;
 };
 
 interface ProductGraphRow {
@@ -84,6 +105,10 @@ function assertResult<T>(result: { data: T | null; error: { message: string } | 
   if (result.error) throw new Error(`${action}: ${result.error.message}`);
   if (result.data === null) throw new Error(`${action}: no data returned`);
   return result.data;
+}
+
+function describeFailure(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown failure";
 }
 
 function toRecommendationInput(row: ProductGraphRow): RecommendationInput {
@@ -165,6 +190,10 @@ export class BrainService {
     return new OpportunityRepository(this.client, this.workspaceId);
   }
 
+  private postPackageRepository() {
+    return new PostPackageRepository(this.client, this.workspaceId, this.mutationActor);
+  }
+
   private async productGraph() {
     const result = await this.client
       .from("products")
@@ -208,6 +237,169 @@ export class BrainService {
 
   async getOpportunityContext(opportunityId: string) {
     return this.opportunityRepository().context(opportunityId);
+  }
+
+  async getPostPackageContext(opportunityId: string) {
+    return this.postPackageRepository().context(opportunityId);
+  }
+
+  async getPostPackageContextByPackage(packageId: string) {
+    return this.postPackageRepository().contextByPackage(packageId);
+  }
+
+  async createPostPackage(input: z.infer<typeof createPostPackageSchema>) {
+    return this.postPackageRepository().create(input);
+  }
+
+  async updatePostPackage(input: z.infer<typeof updatePostPackageSchema>) {
+    return this.postPackageRepository().update(input);
+  }
+
+  async upsertPostPackageVariant(input: z.infer<typeof postPackageVariantSchema>) {
+    return this.postPackageRepository().upsertVariant(input);
+  }
+
+  async setPostPackageAssets(input: z.infer<typeof setPostPackageAssetsSchema>) {
+    return this.postPackageRepository().setAssets(input);
+  }
+
+  async setPostPackageDestinations(input: z.infer<typeof setPostPackageDestinationsSchema>) {
+    return this.postPackageRepository().setDestinations(input);
+  }
+
+  async skipPostPackageDestination(input: z.infer<typeof skipPostPackageDestinationSchema>) {
+    return this.postPackageRepository().skipDestination(input);
+  }
+
+  async recordPostFromPackage(input: z.infer<typeof recordPostFromPackageSchema>) {
+    return this.postPackageRepository().recordPost(input);
+  }
+
+  async finishPostPackage(input: z.infer<typeof finishPostPackageSchema>) {
+    return this.postPackageRepository().finish(input);
+  }
+
+  private async requireMutationActorMembership() {
+    if (!this.mutationActor) throw new Error("Destination mutation actor is required.");
+    const membership = await this.client
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("workspace_id", this.workspaceId)
+      .eq("user_id", this.mutationActor.userId)
+      .maybeSingle();
+    if (membership.error || !membership.data) {
+      throw new Error("Destination mutation actor is not a member of this workspace.");
+    }
+  }
+
+  async getDestinations(): Promise<DestinationRecord[]> {
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .eq("workspace_id", this.workspaceId)
+        .order("is_active", { ascending: false })
+        .order("name"),
+      "Load destinations",
+    ) as unknown as DestinationRecord[];
+  }
+
+  async createDestination(input: z.infer<typeof createDestinationSchema>): Promise<DestinationRecord> {
+    await this.requireMutationActorMembership();
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .insert({ workspace_id: this.workspaceId, ...input })
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .single(),
+      "Create destination",
+    ) as unknown as DestinationRecord;
+  }
+
+  async updateDestination(input: z.infer<typeof updateDestinationSchema>): Promise<DestinationRecord> {
+    await this.requireMutationActorMembership();
+    const { id, ...replacement } = input;
+    return assertResult(
+      await this.client
+        .from("destinations")
+        .update(replacement)
+        .eq("workspace_id", this.workspaceId)
+        .eq("id", id)
+        .select("id,name,platform,posting_identity,notes,is_active,created_at")
+        .single(),
+      "Update destination",
+    ) as unknown as DestinationRecord;
+  }
+
+  async removeNewOpportunityAsset(options: { opportunityId: string; assetId: string; uploadedAfter: string }) {
+    await this.requireMutationActorMembership();
+    const [opportunity, join, asset] = await Promise.all([
+      this.client.from("content_opportunities").select("id").eq("workspace_id", this.workspaceId).eq("id", options.opportunityId).maybeSingle(),
+      this.client.from("content_opportunity_assets").select("asset_id").eq("opportunity_id", options.opportunityId).eq("asset_id", options.assetId).maybeSingle(),
+      this.client.from("assets").select("id,storage_path,created_at").eq("workspace_id", this.workspaceId).eq("id", options.assetId).maybeSingle(),
+    ]);
+    if (opportunity.error || !opportunity.data || join.error || !join.data || asset.error || !asset.data) {
+      throw new Error("Refusing package upload cleanup because the exact workspace opportunity asset could not be verified.");
+    }
+    if (!Number.isFinite(Date.parse(options.uploadedAfter)) || Date.parse(asset.data.created_at) < Date.parse(options.uploadedAfter)) {
+      throw new Error("Refusing package upload cleanup because the asset predates this upload attempt.");
+    }
+
+    const storagePath = asset.data.storage_path;
+    if (storagePath) {
+      const removedObject = await this.client.storage.from("sfl-assets").remove([storagePath]);
+      if (removedObject.error) throw new Error(`Remove newly uploaded Storage object: ${removedObject.error.message}`);
+    }
+    const removedAsset = await this.client
+      .from("assets")
+      .delete()
+      .eq("workspace_id", this.workspaceId)
+      .eq("id", options.assetId)
+      .select("id")
+      .maybeSingle();
+    if (removedAsset.error || !removedAsset.data) {
+      throw new Error(`Remove newly uploaded asset metadata: ${removedAsset.error?.message ?? "exact asset was not removed"}`);
+    }
+  }
+
+  async uploadPostPackageAsset(options: {
+    opportunityId: string;
+    packageId: string;
+    expectedUpdatedAt: string;
+    currentAssets: z.infer<typeof setPostPackageAssetsSchema>["assets"];
+    title?: string;
+    source: "home" | "in_store" | "canva" | "web" | "other";
+    file: File;
+  }) {
+    const uploadedAfter = new Date().toISOString();
+    const assetId = await this.uploadAsset({
+      opportunityId: options.opportunityId,
+      title: options.title,
+      source: options.source,
+      file: options.file,
+    });
+    try {
+      const nextPosition = Math.max(-1, ...options.currentAssets.map((selection) => selection.position)) + 1;
+      await this.setPostPackageAssets({
+        package_id: options.packageId,
+        expected_updated_at: options.expectedUpdatedAt,
+        assets: [...options.currentAssets, { asset_id: assetId, role: "supporting", position: nextPosition }],
+      });
+    } catch (downstreamError) {
+      try {
+        await this.removeNewOpportunityAsset({ opportunityId: options.opportunityId, assetId, uploadedAfter });
+      } catch (cleanupError) {
+        console.error("Post Package upload compensation failed", {
+          opportunityId: options.opportunityId,
+          assetId,
+          downstreamError: describeFailure(downstreamError),
+          cleanupError: describeFailure(cleanupError),
+        });
+        throw new Error(`${describeFailure(downstreamError)} Cleanup of the newly uploaded asset also failed: ${describeFailure(cleanupError)}`);
+      }
+      throw downstreamError;
+    }
+    return assetId;
   }
 
   async searchLibrary(query = "", limit = 50): Promise<JsonRecord[]> {
@@ -335,7 +527,7 @@ export class BrainService {
   async getFormOptions() {
     const [products, destinations, assets, opportunities] = await Promise.all([
       this.client.from("products").select("id,name").eq("workspace_id", this.workspaceId).eq("lifecycle_status", "active").order("name"),
-      this.client.from("destinations").select("id,name,platform").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
+      this.client.from("destinations").select("id,name,platform,posting_identity,notes,is_active").eq("workspace_id", this.workspaceId).eq("is_active", true).order("name"),
       this.client.from("assets").select("id,title,asset_type").eq("workspace_id", this.workspaceId).order("created_at", { ascending: false }),
       this.client.from("content_opportunities").select("id,title,status,content_type,content_opportunity_products(product_id),content_opportunity_assets(asset_id)").eq("workspace_id", this.workspaceId).is("archived_at", null).order("title"),
     ]);
