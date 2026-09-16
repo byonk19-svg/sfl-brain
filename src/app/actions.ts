@@ -455,13 +455,14 @@ export async function recordPostAction(formData: FormData) {
         asset_override_ids: formData.has("asset_ids") ? formStrings(formData, "asset_ids") : undefined,
       });
       destination = `/opportunities/${input.opportunity_id}`;
-      await (await createWebsiteBrainService()).recordPostFromPackage({
+      const publication = await (await createWebsiteBrainService()).recordPostFromPackage({
         package_id: input.package_id,
         distribution_item_id: input.distribution_item_id,
         expected_updated_at: input.expected_updated_at,
         published_at: input.published_at,
         notes: input.notes,
       });
+      destination = `/opportunities/${publication.content_opportunity_id}`;
       revalidatePackageViews(destination);
       destination = messageUrl(destination, "success", "Publication recorded from the approved Post Package snapshot.");
     } else {

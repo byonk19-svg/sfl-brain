@@ -143,9 +143,19 @@ create unique index one_distribution_item_per_post
 create index posts_post_package_idx on public.posts(post_package_id)
   where post_package_id is not null;
 
+create function public.set_post_package_updated_at()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.updated_at is not distinct from old.updated_at then
+    new.updated_at = now();
+  end if;
+  return new;
+end;
+$$;
+
 create trigger post_packages_set_updated_at
   before update on public.post_packages
-  for each row execute function public.set_updated_at();
+  for each row execute function public.set_post_package_updated_at();
 create trigger post_package_caption_variants_set_updated_at
   before update on public.post_package_caption_variants
   for each row execute function public.set_updated_at();
@@ -678,6 +688,7 @@ declare
   v_caption text;
   v_override_destination uuid;
   v_post_id uuid;
+  v_package_updated_at timestamptz;
 begin
   v_result := public.begin_post_package_mutation(
     p_workspace_id, 'record_post_from_package', p_actor_user_id, p_source, p_request_id, v_payload
@@ -724,11 +735,17 @@ begin
     and workspace_id = p_workspace_id and status = 'planned';
   if not found then raise exception 'Distribution item was published concurrently'; end if;
   update public.post_packages
-  set status = 'publishing', updated_by = p_actor_user_id, updated_source = p_source
-  where id = p_package_id and status = 'draft';
+  set status = case when status = 'draft' then 'publishing' else status end,
+    updated_by = p_actor_user_id,
+    updated_source = p_source,
+    updated_at = greatest(pg_catalog.clock_timestamp(), updated_at + interval '1 microsecond')
+  where id = p_package_id and workspace_id = p_workspace_id
+    and status in ('draft', 'publishing')
+  returning updated_at into v_package_updated_at;
+  if not found then raise exception 'Post package changed during publication'; end if;
   select to_jsonb(posts.*) || jsonb_build_object(
     'distribution_item_id', p_distribution_item_id,
-    'package_updated_at', (select updated_at from public.post_packages where id = p_package_id)
+    'package_updated_at', v_package_updated_at
   ) into v_result from public.posts where id = v_post_id;
   perform public.complete_post_package_mutation(
     p_workspace_id, 'record_post_from_package', p_actor_user_id, p_source,
@@ -792,6 +809,7 @@ $$;
 
 revoke execute on function public.reject_terminal_post_package_update() from public, anon, authenticated;
 revoke execute on function public.reject_terminal_post_package_child_mutation() from public, anon, authenticated;
+revoke execute on function public.set_post_package_updated_at() from public, anon, authenticated;
 revoke execute on function public.begin_post_package_mutation(uuid,text,uuid,text,uuid,jsonb) from public, anon, authenticated;
 revoke execute on function public.complete_post_package_mutation(uuid,text,uuid,text,uuid,jsonb,jsonb) from public, anon, authenticated;
 revoke execute on function public.create_post_package(uuid,uuid,uuid,text,uuid,text,text,text) from public, anon, authenticated;

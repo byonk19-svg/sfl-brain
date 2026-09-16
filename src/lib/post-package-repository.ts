@@ -98,6 +98,7 @@ function mapCaptionVariant(row: JsonRecord): PostPackageCaptionVariant {
 function mapRecordedPost(row: JsonRecord) {
   return {
     id: String(row.id),
+    content_opportunity_id: String(row.content_opportunity_id),
     post_package_id: String(row.post_package_id),
     caption_variant_id: String(row.caption_variant_id),
     distribution_item_id: String(row.distribution_item_id),

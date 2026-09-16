@@ -374,13 +374,13 @@ describe("PostPackageRepository", () => {
     });
     expect(saved).toEqual({
       id: "70000000-0000-4000-8000-000000000001",
+      content_opportunity_id: opportunityId,
       post_package_id: packageId,
       caption_variant_id: "94000000-0000-4000-8000-000000000001",
       distribution_item_id: "93000000-0000-4000-8000-000000000001",
       package_updated_at: updatedAt,
     });
     expect(saved).not.toHaveProperty("workspace_id");
-    expect(saved).not.toHaveProperty("content_opportunity_id");
     expect(saved).not.toHaveProperty("caption");
     expect(saved).not.toHaveProperty("storage_path");
   });

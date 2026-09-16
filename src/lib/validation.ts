@@ -216,6 +216,11 @@ export const radarEventSchema = z.object({
   source: optionalText,
 });
 
+const explicitPublicationInstant = z.string().min(1).refine(
+  (value) => z.string().datetime({ offset: true }).safeParse(value).success,
+  "Enter a valid publication date with a timezone",
+).transform((value) => new Date(value).toISOString());
+
 export const recordPostSchema = z.object({
   content_opportunity_id: z.uuid({
     error: "Choose a content opportunity",
@@ -223,7 +228,7 @@ export const recordPostSchema = z.object({
   destination_id: z.uuid(),
   product_ids: z.array(z.uuid()).default([]),
   asset_ids: z.array(z.uuid()).default([]),
-  published_at: z.string().min(1).transform((value) => new Date(value).toISOString()),
+  published_at: explicitPublicationInstant,
   caption: optionalText,
   angle: optionalText,
   performance_label: z.enum(["unknown", "weak", "normal", "winner"]).default("unknown"),
@@ -352,11 +357,7 @@ export const recordPostFromPackageSchema = z.object({
   distribution_item_id: z.uuid(),
   request_id: z.uuid().nullish(),
   expected_updated_at: optimisticUpdatedAt,
-  published_at: z
-    .string()
-    .min(1)
-    .refine((value) => Number.isFinite(Date.parse(value)), "Enter a valid publication date")
-    .transform((value) => new Date(value).toISOString()),
+  published_at: explicitPublicationInstant,
   notes: optionalText,
 });
 

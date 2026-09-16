@@ -20,7 +20,7 @@ declare
   v_package jsonb;
   v_package_id uuid;
   v_package_updated_at timestamptz;
-  v_package_ctid tid;
+  v_pre_second_publication_updated_at timestamptz;
   v_variant jsonb;
   v_variant_id uuid;
   v_variant_updated_at timestamptz;
@@ -508,20 +508,31 @@ begin
     or (select status from public.post_package_destinations where package_id = v_package_id and destination_id = v_destination_a3) <> 'planned' then
     raise exception 'Late destination addition did not preserve published distribution history';
   end if;
-  select ctid into v_package_ctid from public.post_packages where id = v_package_id;
-
+  v_pre_second_publication_updated_at := v_package_updated_at;
   v_post := public.record_post_from_package(
     v_workspace_a, v_package_id, v_second_distribution_item_id, v_actor_a,
     'chatgpt_connector', v_second_record_request_id,
     v_package_updated_at, now(), 'Second package publication'
   );
   if (select status from public.post_packages where id = v_package_id) <> 'publishing'
-    or (select updated_at from public.post_packages where id = v_package_id) <> v_package_updated_at
-    or (select ctid from public.post_packages where id = v_package_id) <> v_package_ctid
+    or (select updated_at from public.post_packages where id = v_package_id) <= v_pre_second_publication_updated_at
+    or (select updated_by from public.post_packages where id = v_package_id) <> v_actor_a
+    or (select updated_source from public.post_packages where id = v_package_id) <> 'chatgpt_connector'
+    or (v_post->>'package_updated_at')::timestamptz <> (select updated_at from public.post_packages where id = v_package_id)
     or (select count(*) from public.post_package_destinations where package_id = v_package_id and status = 'published') <> 2
     or (select count(*) from public.post_package_destinations where package_id = v_package_id and id = v_second_distribution_item_id and post_id = (v_post->>'id')::uuid) <> 1 then
-    raise exception 'A later publication repeated the Draft to Publishing transition';
+    raise exception 'A later publication did not advance package version and audit';
   end if;
+  begin
+    perform public.record_post_from_package(
+      v_workspace_a, v_package_id, v_third_distribution_item_id, v_actor_a, 'website', null,
+      v_pre_second_publication_updated_at, now(), 'Stale after second publication'
+    );
+    raise exception 'Pre-second-publication token remained valid';
+  exception when others then
+    if sqlerrm = 'Pre-second-publication token remained valid' then raise; end if;
+  end;
+  v_package_updated_at := (v_post->>'package_updated_at')::timestamptz;
 
   begin
     perform public.finish_post_package(

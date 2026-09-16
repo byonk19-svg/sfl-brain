@@ -115,7 +115,7 @@ describe("form validation", () => {
         destination_id: "20000000-0000-4000-8000-000000000001",
         product_ids: [],
         asset_ids: [],
-        published_at: "2026-09-06T09:00",
+        published_at: "2026-09-06T14:00:00.000Z",
         performance_label: "unknown",
       }),
     ).toMatchObject({
@@ -195,6 +195,11 @@ describe("post package validation", () => {
       working_angle: "Updated angle",
       notes: null,
     });
+    expect(() => recordPostSchema.parse({
+      content_opportunity_id: "90000000-0000-4000-8000-000000000003",
+      destination_id: "20000000-0000-4000-8000-000000000001",
+      published_at: "2026-09-06T09:00",
+    })).toThrow(/valid publication date/i);
     expect(() => updatePostPackageSchema.parse({
       package_id: uuid(2),
       expected_updated_at: updatedAt,
@@ -276,13 +281,30 @@ describe("post package validation", () => {
     })).toMatchObject({ success: false });
   });
 
+  it("requires an explicit publication instant and normalizes a Chicago offset", () => {
+    const input = {
+      package_id: uuid(1),
+      distribution_item_id: uuid(2),
+      expected_updated_at: updatedAt,
+    };
+
+    expect(recordPostFromPackageSchema.safeParse({
+      ...input,
+      published_at: "2026-09-15T12:30",
+    })).toMatchObject({ success: false });
+    expect(recordPostFromPackageSchema.parse({
+      ...input,
+      published_at: "2026-09-15T12:30:00-05:00",
+    }).published_at).toBe("2026-09-15T17:30:00.000Z");
+  });
+
   it("rejects manual caption, destination, product, and asset overrides for package publications", () => {
     const publication = {
       opportunity_id: uuid(1),
       package_id: uuid(2),
       distribution_item_id: uuid(3),
       expected_updated_at: updatedAt,
-      published_at: "2026-09-15T12:30",
+      published_at: "2026-09-15T17:30:00.000Z",
     };
 
     expect(recordPostFromPackageWebsiteSchema.parse(publication)).toMatchObject({

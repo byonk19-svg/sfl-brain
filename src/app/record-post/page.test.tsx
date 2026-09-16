@@ -100,6 +100,8 @@ describe("RecordPostPage package publication", () => {
     expect(screen.queryByRole("combobox", { name: "Destination" })).not.toBeInTheDocument();
     expect(view.container.querySelector('input[name="asset_ids"], input[name="product_ids"]')).toBeNull();
     expect(view.container.querySelector(`input[name="distribution_item_id"]`)).toHaveValue(ids.distribution);
+    expect(view.container.querySelector('input[type="datetime-local"]')).toHaveAttribute("name", "published_at_local");
+    expect(view.container.querySelector('input[type="hidden"][name="published_at"]')).toBeInTheDocument();
     expect(view.container.textContent).not.toContain("storage_path");
   });
 });

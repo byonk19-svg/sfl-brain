@@ -23,6 +23,7 @@ const opportunityId = "90000000-0000-4000-8000-000000000001";
 const packageId = "90000000-0000-4000-8000-000000000002";
 const distributionId = "90000000-0000-4000-8000-000000000003";
 const destinationId = "90000000-0000-4000-8000-000000000004";
+const authoritativeOpportunityId = "90000000-0000-4000-8000-000000000009";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -30,22 +31,30 @@ beforeEach(() => {
 
 describe("recordPostAction", () => {
   it("records a package publication with only package-owned snapshot identifiers", async () => {
+    mocks.brain.recordPostFromPackage.mockResolvedValue({
+      id: "90000000-0000-4000-8000-000000000008",
+      content_opportunity_id: authoritativeOpportunityId,
+      post_package_id: packageId,
+      caption_variant_id: "90000000-0000-4000-8000-000000000007",
+      distribution_item_id: distributionId,
+      package_updated_at: "2026-09-15T12:31:00.000Z",
+    });
     const form = new FormData();
     form.set("content_opportunity_id", opportunityId);
     form.set("package_id", packageId);
     form.set("distribution_item_id", distributionId);
     form.set("expected_updated_at", "2026-09-15T12:00:00.000Z");
-    form.set("published_at", "2026-09-15T12:30");
+    form.set("published_at", "2026-09-15T17:30:00.000Z");
     form.set("notes", "Published from website");
 
     await expect(recordPostAction(form)).rejects.toMatchObject({
-      url: expect.stringContaining(`/opportunities/${opportunityId}?success=`),
+      url: expect.stringContaining(`/opportunities/${authoritativeOpportunityId}?success=`),
     });
     expect(mocks.brain.recordPostFromPackage).toHaveBeenCalledWith({
       package_id: packageId,
       distribution_item_id: distributionId,
       expected_updated_at: "2026-09-15T12:00:00.000Z",
-      published_at: new Date("2026-09-15T12:30").toISOString(),
+      published_at: "2026-09-15T17:30:00.000Z",
       notes: "Published from website",
     });
     expect(mocks.brain.recordPost).not.toHaveBeenCalled();
@@ -57,7 +66,7 @@ describe("recordPostAction", () => {
     form.set("package_id", packageId);
     form.set("distribution_item_id", distributionId);
     form.set("expected_updated_at", "2026-09-15T12:00:00.000Z");
-    form.set("published_at", "2026-09-15T12:30");
+    form.set("published_at", "2026-09-15T17:30:00.000Z");
     form.set("caption", "Unapproved override");
     form.set("asset_ids", "90000000-0000-4000-8000-000000000005");
 
@@ -72,7 +81,7 @@ describe("recordPostAction", () => {
     const form = new FormData();
     form.set("content_opportunity_id", opportunityId);
     form.set("destination_id", destinationId);
-    form.set("published_at", "2026-09-15T12:30");
+    form.set("published_at", "2026-09-15T17:30:00.000Z");
     form.set("caption", "Manual legacy post");
     form.set("performance_label", "unknown");
 
