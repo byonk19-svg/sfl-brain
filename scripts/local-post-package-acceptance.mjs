@@ -7,11 +7,15 @@ import {
   assertExplicitStorageMissing,
   assertExplicitUserMissing,
   assertLoopback,
+  assertStoragePrefixEmpty,
   buildCleanupSql,
   executeCleanupSql,
+  listStoragePrefixObjects,
   loadLocalAcceptanceConfig,
+  removeStorageObjects,
   startNextServer,
   stopProcessTree,
+  storageFixturePrefix,
 } from "./local-acceptance-support.mjs";
 
 const require = createRequire(import.meta.url);
@@ -288,10 +292,17 @@ try {
   } catch (error) {
     cleanupErrors.push(error);
   }
-  for (const storagePath of fixtures.storagePaths) {
-    const removed = await service.storage.from("sfl-assets").remove([storagePath]);
-    if (removed.error) cleanupErrors.push(removed.error);
+  const storage = service.storage.from("sfl-assets");
+  const prefixedStoragePaths = [];
+  for (const recoveredOpportunityId of fixtures.opportunityIds) {
+    try {
+      prefixedStoragePaths.push(...await listStoragePrefixObjects(storage, storageFixturePrefix(workspaceId, recoveredOpportunityId)));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
   }
+  fixtures.storagePaths = union(fixtures.storagePaths, prefixedStoragePaths);
+  try { await removeStorageObjects(storage, fixtures.storagePaths); } catch (error) { cleanupErrors.push(error); }
   try {
     executeCleanupSql(local, buildCleanupSql({ workspaceId, ...fixtures }));
   } catch (error) {
@@ -399,6 +410,9 @@ async function proveCleanup(fixtures) {
   } catch (error) { cleanupErrors.push(error); }
   for (const storagePath of fixtures.storagePaths) {
     try { assertExplicitStorageMissing(await service.storage.from("sfl-assets").download(storagePath)); } catch (error) { cleanupErrors.push(error); }
+  }
+  for (const recoveredOpportunityId of fixtures.opportunityIds) {
+    try { await assertStoragePrefixEmpty(service.storage.from("sfl-assets"), storageFixturePrefix(workspaceId, recoveredOpportunityId)); } catch (error) { cleanupErrors.push(error); }
   }
 }
 

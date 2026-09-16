@@ -236,3 +236,52 @@ export function assertExplicitStorageMissing(result) {
     throw new Error(`Storage response did not prove object absence: ${result.error?.code ?? result.error?.message ?? "missing explicit not-found error"}`);
   }
 }
+
+export function storageFixturePrefix(workspaceId, opportunityId) {
+  if (!UUID.test(workspaceId) || !UUID.test(opportunityId)) {
+    throw new Error("Storage fixture prefix requires exact workspace and opportunity UUIDs");
+  }
+  return `${workspaceId}/opportunities/${opportunityId}/`;
+}
+
+export async function listStoragePrefixObjects(storage, prefix, pageSize = 100) {
+  if (!prefix.endsWith("/") || prefix.includes("..")) throw new Error("Unsafe Storage fixture prefix");
+  const objects = [];
+  const pending = [prefix.slice(0, -1)];
+  while (pending.length) {
+    const current = pending.shift();
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await storage.list(current, {
+        limit: pageSize,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+      if (result.error) throw new Error(`Storage prefix list failed: ${result.error.message}`);
+      if (!Array.isArray(result.data)) throw new Error("Storage prefix list returned no explicit result set");
+      for (const item of result.data) {
+        if (!item?.name || item.name.includes("/") || item.name === "." || item.name === "..") {
+          throw new Error("Storage prefix list returned an unsafe object name");
+        }
+        const objectPath = `${current}/${item.name}`;
+        if (item.id === null || item.id === undefined) pending.push(objectPath);
+        else objects.push(objectPath);
+      }
+      if (result.data.length < pageSize) break;
+    }
+  }
+  return [...new Set(objects)];
+}
+
+export async function removeStorageObjects(storage, objectPaths, batchSize = 100) {
+  const unique = [...new Set(objectPaths)];
+  for (let index = 0; index < unique.length; index += batchSize) {
+    const batch = unique.slice(index, index + batchSize);
+    const result = await storage.remove(batch);
+    if (result.error) throw new Error(`Storage object cleanup failed: ${result.error.message}`);
+  }
+}
+
+export async function assertStoragePrefixEmpty(storage, prefix) {
+  const remaining = await listStoragePrefixObjects(storage, prefix);
+  if (remaining.length) throw new Error(`Storage objects remained under the disposable prefix: ${remaining.join(", ")}`);
+}

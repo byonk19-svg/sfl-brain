@@ -6,7 +6,10 @@ import {
   assertExplicitStorageMissing,
   assertExplicitUserMissing,
   assertPortAvailable,
+  assertStoragePrefixEmpty,
   buildCleanupSql,
+  listStoragePrefixObjects,
+  storageFixturePrefix,
   validateLocalSupabaseConfig,
 } from "./local-acceptance-support.mjs";
 
@@ -82,4 +85,29 @@ test("port preflight rejects a listener already occupying the acceptance port", 
   await assert.rejects(assertPortAvailable("127.0.0.1", port), /already in use/i);
   await new Promise((resolve) => occupied.close(resolve));
   await assert.doesNotReject(assertPortAvailable("127.0.0.1", port));
+});
+
+test("Storage prefix recovery paginates and descends into nested folders", async () => {
+  const calls = [];
+  const storage = {
+    list: async (prefix, options) => {
+      calls.push([prefix, options.offset]);
+      if (prefix.endsWith("nested")) return { data: [{ id: "file-2", name: "two.png" }], error: null };
+      if (options.offset === 0) return { data: [{ id: "file-1", name: "one.png" }, { id: null, name: "nested" }], error: null };
+      return { data: [], error: null };
+    },
+  };
+  const prefix = storageFixturePrefix("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333");
+  assert.deepEqual(await listStoragePrefixObjects(storage, prefix, 2), [
+    `${prefix}one.png`,
+    `${prefix}nested/two.png`,
+  ]);
+  assert.deepEqual(calls, [[prefix.slice(0, -1), 0], [prefix.slice(0, -1), 2], [`${prefix}nested`, 0]]);
+});
+
+test("Storage prefix proof rejects listing errors and surviving objects", async () => {
+  const prefix = storageFixturePrefix("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333");
+  await assert.rejects(listStoragePrefixObjects({ list: async () => ({ data: null, error: new Error("network") }) }, prefix), /list.*network/i);
+  await assert.rejects(assertStoragePrefixEmpty({ list: async () => ({ data: [{ id: "file", name: "left.png" }], error: null }) }, prefix), /remained/i);
+  assert.throws(() => storageFixturePrefix("../unsafe", "33333333-3333-4333-8333-333333333333"), /UUID/i);
 });
