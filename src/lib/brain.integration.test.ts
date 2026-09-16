@@ -1,10 +1,120 @@
 import { describe, expect, it } from "vitest";
+import { createClient } from "@supabase/supabase-js";
 
 import { createBrainService } from "@/lib/brain";
+import { getServerEnv } from "@/lib/env";
 
 const integration = describe.runIf(process.env.SFL_INTEGRATION === "1");
 
 integration("local Supabase integration", () => {
+  it("creates and edits a typed post package through the real service boundary", async () => {
+    const env = getServerEnv();
+    const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const workspaceId = env.SFL_WORKSPACE_ID;
+    const createdUser = await admin.auth.admin.createUser({
+      email: `post-package-${crypto.randomUUID()}@example.test`,
+      email_confirm: true,
+    });
+    if (createdUser.error || !createdUser.data.user) {
+      throw new Error(createdUser.error?.message ?? "Integration actor was not created");
+    }
+    const actorId = createdUser.data.user.id;
+    const membership = await admin.from("workspace_members").insert({
+      workspace_id: workspaceId,
+      user_id: actorId,
+    });
+    if (membership.error) throw new Error(membership.error.message);
+
+    let opportunityId: string | null = null;
+    try {
+      const brain = createBrainService(workspaceId, { userId: actorId, source: "website" });
+      opportunityId = await brain.createContentOpportunity({
+        title: `Package integration ${crypto.randomUUID()}`,
+        status: "needs_caption",
+        content_type: "comparison",
+        media_format: "carousel",
+        notes: undefined,
+        next_action: "Prepare package",
+        estimated_minutes_remaining: 10,
+        product_ids: [],
+        asset_ids: [],
+      });
+
+      const created = await brain.createPostPackage({
+        opportunity_id: opportunityId,
+        base_caption: "Package base caption",
+        working_angle: "Comparison",
+      });
+      expect(created).toMatchObject({ opportunity_id: opportunityId, sequence: 1, status: "draft" });
+
+      let context = await brain.getPostPackageContext(opportunityId);
+      const active = context.active_package;
+      expect(active).toMatchObject({ id: created.id, base_caption: "Package base caption" });
+      if (!active) throw new Error("Expected an active package");
+
+      const variant = await brain.upsertPostPackageVariant({
+        package_id: active.id,
+        expected_updated_at: active.updated_at,
+        audience: "sfl_page",
+        body: "Approved package caption",
+        status: "approved",
+      });
+      expect(variant).toMatchObject({ audience: "sfl_page", status: "approved" });
+
+      context = await brain.getPostPackageContext(opportunityId);
+      await brain.setPostPackageAssets({
+        package_id: active.id,
+        expected_updated_at: context.active_package!.updated_at,
+        assets: [{
+          asset_id: "60000000-0000-4000-8000-000000000007",
+          role: "hero",
+          position: 0,
+        }],
+      });
+
+      context = await brain.getPostPackageContext(opportunityId);
+      await brain.setPostPackageDestinations({
+        package_id: active.id,
+        expected_updated_at: context.active_package!.updated_at,
+        destinations: [{
+          destination_id: "20000000-0000-4000-8000-000000000001",
+          caption_variant_id: variant.id,
+        }],
+      });
+
+      context = await brain.getPostPackageContext(opportunityId);
+      const distribution = context.active_package!.distribution_items[0]!;
+      await brain.skipPostPackageDestination({
+        package_id: active.id,
+        distribution_item_id: distribution.id,
+        expected_updated_at: context.active_package!.updated_at,
+        skip_reason: "Integration verification",
+      });
+
+      expect((await brain.getPostPackageContext(opportunityId)).active_package).toMatchObject({
+        assets: [expect.objectContaining({ role: "hero", position: 0 })],
+        distribution_items: [expect.objectContaining({ status: "skipped" })],
+      });
+    } finally {
+      if (opportunityId) {
+        const deletedOpportunity = await admin
+          .from("content_opportunities")
+          .delete()
+          .eq("id", opportunityId);
+        if (deletedOpportunity.error) throw new Error(deletedOpportunity.error.message);
+      }
+      const deletedMembership = await admin
+        .from("workspace_members")
+        .delete()
+        .eq("user_id", actorId);
+      if (deletedMembership.error) throw new Error(deletedMembership.error.message);
+      const deletedUser = await admin.auth.admin.deleteUser(actorId);
+      if (deletedUser.error) throw new Error(deletedUser.error.message);
+    }
+  });
+
   it("loads the seeded ranking and Library through the real repository", async () => {
     const brain = createBrainService();
 

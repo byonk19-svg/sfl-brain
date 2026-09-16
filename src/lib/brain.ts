@@ -9,21 +9,30 @@ import {
   type TodayContentFilters,
 } from "@/lib/content-recommendations";
 import { OpportunityRepository } from "@/lib/opportunity-repository";
+import { PostPackageRepository } from "@/lib/post-package-repository";
 import type { CreatePilotOpportunityInput, RecordPilotPostInput, UpdatePilotOpportunityInput } from "@/lib/mcp/pilot-write-schemas";
 import {
   type RecommendationInput,
 } from "@/lib/recommendations";
 import type {
   affiliateLinkSchema,
+  createPostPackageSchema,
   createOpportunitySchema,
   createProductSchema,
   editOpportunitySchema,
   editProductSchema,
+  finishPostPackageSchema,
   listingSchema,
   opportunityAssetSchema,
   opportunityProductSchema,
+  postPackageVariantSchema,
   radarEventSchema,
+  recordPostFromPackageSchema,
   recordPostSchema,
+  setPostPackageAssetsSchema,
+  setPostPackageDestinationsSchema,
+  skipPostPackageDestinationSchema,
+  updatePostPackageSchema,
 } from "@/lib/validation";
 import { validateUpload } from "@/lib/validation";
 
@@ -165,6 +174,10 @@ export class BrainService {
     return new OpportunityRepository(this.client, this.workspaceId);
   }
 
+  private postPackageRepository() {
+    return new PostPackageRepository(this.client, this.workspaceId, this.mutationActor);
+  }
+
   private async productGraph() {
     const result = await this.client
       .from("products")
@@ -208,6 +221,42 @@ export class BrainService {
 
   async getOpportunityContext(opportunityId: string) {
     return this.opportunityRepository().context(opportunityId);
+  }
+
+  async getPostPackageContext(opportunityId: string) {
+    return this.postPackageRepository().context(opportunityId);
+  }
+
+  async createPostPackage(input: z.infer<typeof createPostPackageSchema>) {
+    return this.postPackageRepository().create(input);
+  }
+
+  async updatePostPackage(input: z.infer<typeof updatePostPackageSchema>) {
+    return this.postPackageRepository().update(input);
+  }
+
+  async upsertPostPackageVariant(input: z.infer<typeof postPackageVariantSchema>) {
+    return this.postPackageRepository().upsertVariant(input);
+  }
+
+  async setPostPackageAssets(input: z.infer<typeof setPostPackageAssetsSchema>) {
+    return this.postPackageRepository().setAssets(input);
+  }
+
+  async setPostPackageDestinations(input: z.infer<typeof setPostPackageDestinationsSchema>) {
+    return this.postPackageRepository().setDestinations(input);
+  }
+
+  async skipPostPackageDestination(input: z.infer<typeof skipPostPackageDestinationSchema>) {
+    return this.postPackageRepository().skipDestination(input);
+  }
+
+  async recordPostFromPackage(input: z.infer<typeof recordPostFromPackageSchema>) {
+    return this.postPackageRepository().recordPost(input);
+  }
+
+  async finishPostPackage(input: z.infer<typeof finishPostPackageSchema>) {
+    return this.postPackageRepository().finish(input);
   }
 
   async searchLibrary(query = "", limit = 50): Promise<JsonRecord[]> {
