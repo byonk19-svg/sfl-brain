@@ -96,19 +96,25 @@ const internalPackageKeys = new Set([
   "approved_by",
 ]);
 
-function isTrustedSignedAssetUrl(value: string) {
+function isTrustedSignedAssetUrl(value: string, trustedStorageOrigin?: string) {
   try {
     const url = new URL(value);
-    const local = (url.hostname === "127.0.0.1" || url.hostname === "localhost") && url.protocol === "http:";
-    const hosted = url.protocol === "https:" && url.hostname.endsWith(".supabase.co");
-    return (local || hosted) && url.pathname.includes("/storage/v1/object/sign/");
+    const expected = trustedStorageOrigin ? new URL(trustedStorageOrigin) : null;
+    return Boolean(
+      expected &&
+      expected.protocol === "https:" &&
+      url.protocol === "https:" &&
+      url.origin === expected.origin &&
+      /^\/storage\/v1\/object\/sign\/sfl-assets\/.+/.test(url.pathname) &&
+      Boolean(url.searchParams.get("token")),
+    );
   } catch {
     return false;
   }
 }
 
-function sanitizePostPackage(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sanitizePostPackage);
+function sanitizePostPackage(value: unknown, trustedStorageOrigin?: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizePostPackage(item, trustedStorageOrigin));
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).flatMap(([key, child]) => {
@@ -116,10 +122,10 @@ function sanitizePostPackage(value: unknown): unknown {
           internalPackageKeys.has(key) ||
           /(^|_)(access_token|refresh_token|password|credential|secret|api_key|private_key)$/i.test(key)
         ) return [];
-        if (key === "signed_url" && typeof child === "string" && !isTrustedSignedAssetUrl(child)) {
+        if (key === "signed_url" && typeof child === "string" && !isTrustedSignedAssetUrl(child, trustedStorageOrigin)) {
           return [[key, null]];
         }
-        return [[key, sanitizePostPackage(child)]];
+        return [[key, sanitizePostPackage(child, trustedStorageOrigin)]];
       }),
     );
   }
@@ -143,7 +149,12 @@ function failure(error: unknown) {
 
 export function createSflMcpServer(
   reader: BrainReader,
-  options: { enableDevelopmentTestWrite?: boolean; enablePilotWrites?: boolean } = {},
+  options: {
+    enableDevelopmentTestWrite?: boolean;
+    enablePilotWrites?: boolean;
+    enablePostPackageWrites?: boolean;
+    trustedStorageOrigin?: string;
+  } = {},
 ) {
   const server = new McpServer(
     { name: "sfl-brain", version: "0.2.1" },
@@ -231,7 +242,7 @@ export function createSflMcpServer(
     try {
       return success(
         "post_package_context",
-        sanitizePostPackage(await reader.getPostPackageContext(opportunity_id)),
+        sanitizePostPackage(await reader.getPostPackageContext(opportunity_id), options.trustedStorageOrigin),
         "Current Post Package context.",
       );
     } catch (error) {
@@ -239,19 +250,8 @@ export function createSflMcpServer(
     }
   });
 
+  const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
   if (options.enablePilotWrites) {
-    const unavailable = (name: string) => failure(new Error(`${name} is not configured`));
-    const rereadPackage = async (packageId: string) => {
-      if (!reader.getPostPackageContextByPackage) {
-        throw new Error("Post Package lookup is not configured");
-      }
-      const context = await reader.getPostPackageContextByPackage(packageId);
-      const packages = [context.active_package, ...context.prior_packages].filter(Boolean);
-      if (!packages.some((item) => item?.id === packageId)) {
-        throw new Error("Saved Post Package could not be verified in fresh context");
-      }
-      return sanitizePostPackage(context);
-    };
     server.registerTool("create_content_opportunity", { title: "Save Content Idea", description: "Save a real content idea. Use only when the user asks to save it; products, links, and assets are optional.", inputSchema: createPilotOpportunitySchema, annotations: developmentWriteAnnotations }, async (args) => {
       try { if (!reader.createPilotContentOpportunity) return unavailable("Create content opportunity"); const result = await reader.createPilotContentOpportunity(args); const id = String(result.opportunity_id); const saved = await reader.getOpportunityContext(id); return success("opportunity", { id, saved_state: sanitize(saved) }, "Content idea saved."); } catch (error) { return failure(error); }
     });
@@ -264,6 +264,20 @@ export function createSflMcpServer(
     server.registerTool("place_content_opportunity_on_hold", { title: "Put Content On Hold", description: "Put a verified opportunity on hold only after the user confirms the reason and release condition.", inputSchema: placeHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.placeContentOpportunityOnHold) return unavailable("Place hold"); const hold = await reader.placeContentOpportunityOnHold(args); return success("hold", hold, "Content opportunity moved to On hold."); } catch (error) { return failure(error); } });
     server.registerTool("update_content_opportunity_hold", { title: "Update Content Hold", description: "Update the current hold after an explicit user request and fresh read.", inputSchema: updateHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.updateContentOpportunityHold) return unavailable("Update hold"); return success("hold", await reader.updateContentOpportunityHold(args), "Hold details updated."); } catch (error) { return failure(error); } });
     server.registerTool("release_content_opportunity_hold", { title: "Return Content To Backlog", description: "Manually release the current hold only after the user confirms.", inputSchema: releaseHoldSchema, annotations: developmentWriteAnnotations }, async (args) => { try { if (!reader.releaseContentOpportunityHold) return unavailable("Release hold"); return success("hold", await reader.releaseContentOpportunityHold(args), "Content opportunity returned to the active backlog."); } catch (error) { return failure(error); } });
+  }
+
+  if (options.enablePostPackageWrites) {
+    const rereadPackage = async (packageId: string) => {
+      if (!reader.getPostPackageContextByPackage) {
+        throw new Error("Post Package lookup is not configured");
+      }
+      const context = await reader.getPostPackageContextByPackage(packageId);
+      const packages = [context.active_package, ...context.prior_packages].filter(Boolean);
+      if (!packages.some((item) => item?.id === packageId)) {
+        throw new Error("Saved Post Package could not be verified in fresh context");
+      }
+      return sanitizePostPackage(context, options.trustedStorageOrigin);
+    };
     server.registerTool("create_post_package", {
       title: "Start Post Package",
       description: "Start a Post Package only after an explicit workspace-member request and a fresh get_post_package_context read confirms there is no active package.",
@@ -273,8 +287,7 @@ export function createSflMcpServer(
       try {
         if (!reader.createPostPackage) return unavailable("Create Post Package");
         const saved = await reader.createPostPackage(args);
-        const context = await reader.getPostPackageContext(saved.opportunity_id);
-        return success("post_package_context", sanitizePostPackage(context), "Post Package started and re-read.");
+        return success("post_package_context", await rereadPackage(saved.id), "Post Package started and re-read.");
       } catch (error) { return failure(error); }
     });
     server.registerTool("update_post_package", {

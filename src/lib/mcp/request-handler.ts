@@ -38,6 +38,7 @@ function localWritesEnabled() {
 const localHandler = createMcpHandler(
   () => createSflMcpServer(createBrainService(), {
     enablePilotWrites: localWritesEnabled(),
+    trustedStorageOrigin: process.env.SUPABASE_URL,
   }),
   { legacy: "stateless" },
 );
@@ -64,6 +65,8 @@ function createHostedHandler(member: ConnectorMember) {
       source: "chatgpt_connector",
     }), {
       enablePilotWrites: true,
+      enablePostPackageWrites: true,
+      trustedStorageOrigin: process.env.SUPABASE_URL,
     }),
     { legacy: "stateless" },
   );

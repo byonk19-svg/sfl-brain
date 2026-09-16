@@ -72,7 +72,43 @@ describe("SFL Brain MCP server", () => {
     }
   });
 
-  it("adds the approved conversational writes only when enabled", async () => {
+  it("keeps Post Package writes out of legacy local pilot-write mode", async () => {
+    const reader: BrainReader = {
+      getTodayCandidates: async () => [],
+      searchContentBacklog: async () => [],
+      searchLibrary: async () => [],
+      getProductContext: async () => null,
+      getOpportunityContext: async () => null,
+      getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
+      getRecentPosts: async () => [],
+      getRevivalEvents: async () => [],
+    };
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const hostedClient = new Client({ name: "local-pilot-client", version: "1.0.0" });
+    const hostedServer = createSflMcpServer(reader, { enablePilotWrites: true });
+    await hostedServer.connect(serverTransport);
+    await hostedClient.connect(clientTransport);
+
+    try {
+      const tools = (await hostedClient.listTools()).tools;
+      expect(tools.filter((tool) => tool.annotations?.readOnlyHint === false).map((tool) => tool.name)).toEqual([
+        "create_content_opportunity",
+        "update_content_opportunity",
+        "record_post",
+        "place_content_opportunity_on_hold",
+        "update_content_opportunity_hold",
+        "release_content_opportunity_hold",
+      ]);
+      expect(tools.map((tool) => tool.name)).not.toContain("create_post_package");
+      expect(tools.map((tool) => tool.name)).not.toContain("finish_post_package");
+      expect(tools.map((tool) => tool.name)).not.toContain("create_development_test_opportunity");
+    } finally {
+      await hostedClient.close();
+      await hostedServer.close();
+    }
+  });
+
+  it("adds Post Package writes only with hosted package enablement", async () => {
     const reader: BrainReader = {
       getTodayCandidates: async () => [],
       searchContentBacklog: async () => [],
@@ -85,37 +121,18 @@ describe("SFL Brain MCP server", () => {
     };
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const hostedClient = new Client({ name: "hosted-sfl-client", version: "1.0.0" });
-    const hostedServer = createSflMcpServer(reader, { enablePilotWrites: true });
+    const hostedServer = createSflMcpServer(reader, {
+      enablePilotWrites: true,
+      enablePostPackageWrites: true,
+      trustedStorageOrigin: "https://project.supabase.co",
+    });
     await hostedServer.connect(serverTransport);
     await hostedClient.connect(clientTransport);
-
     try {
-      const tools = (await hostedClient.listTools()).tools;
-      expect(tools.map((tool) => tool.name)).toEqual([
-        "get_today_candidates",
-      "get_available_destinations",
-      "get_on_hold_opportunities",
-      "get_post_package_context",
-        "create_content_opportunity",
-        "update_content_opportunity",
-      "record_post",
-      "place_content_opportunity_on_hold",
-      "update_content_opportunity_hold",
-      "release_content_opportunity_hold",
-      "create_post_package",
-      "update_post_package",
-      "upsert_post_package_caption_variant",
-      "set_post_package_assets",
-      "set_post_package_destinations",
-      "skip_post_package_destination",
-      "finish_post_package",
-        "search_sfl_library",
-        "get_product_context",
-        "get_content_opportunity_context",
-        "get_recent_posts",
-        "get_revival_events",
-      ]);
-      expect(tools.filter((tool) => tool.annotations?.readOnlyHint === false).map((tool) => tool.name)).toEqual([
+      const writable = (await hostedClient.listTools()).tools
+        .filter((tool) => tool.annotations?.readOnlyHint === false)
+        .map((tool) => tool.name);
+      expect(writable).toEqual([
         "create_content_opportunity",
         "update_content_opportunity",
         "record_post",
@@ -130,7 +147,6 @@ describe("SFL Brain MCP server", () => {
         "skip_post_package_destination",
         "finish_post_package",
       ]);
-      expect(tools.map((tool) => tool.name)).not.toContain("create_development_test_opportunity");
     } finally {
       await hostedClient.close();
       await hostedServer.close();
@@ -141,26 +157,30 @@ describe("SFL Brain MCP server", () => {
     const calls: string[] = [];
     const opportunityId = candidate.opportunity_id;
     const packageId = "a0000000-0000-4000-8000-000000000003";
+    let includeSavedPackage = true;
     const reader: BrainReader = {
       getTodayCandidates: async () => [],
       searchContentBacklog: async () => [],
       searchLibrary: async () => [],
       getProductContext: async () => null,
       getOpportunityContext: async () => null,
-      getPostPackageContext: async (id) => {
-        calls.push(`read:${id}`);
+      getPostPackageContext: async (id) => ({ opportunity_id: id, active_package: null, prior_packages: [] }),
+      getPostPackageContextByPackage: async (id) => {
+        calls.push(`read-package:${id}`);
         return {
-          opportunity_id: id,
-          active_package: {
+          opportunity_id: opportunityId,
+          active_package: includeSavedPackage ? {
             id: packageId,
             storage_path: "private/secret.jpg",
             created_by: "internal-user-id",
             access_token: "credential-must-not-leak",
             assets: [
-              { asset: { signed_url: "https://project.supabase.co/storage/v1/object/sign/sfl-assets/good" } },
-              { asset: { signed_url: "https://evil.example/steal" } },
+              { asset: { signed_url: "https://project.supabase.co/storage/v1/object/sign/sfl-assets/folder/good.jpg?token=signed-jwt" } },
+              { asset: { signed_url: "https://other.supabase.co/storage/v1/object/sign/sfl-assets/folder/bad.jpg?token=signed-jwt" } },
+              { asset: { signed_url: "https://project.supabase.co/storage/v1/object/sign/sfl-assets/folder/missing-token.jpg" } },
+              { asset: { signed_url: "http://project.supabase.co/storage/v1/object/sign/sfl-assets/folder/insecure.jpg?token=signed-jwt" } },
             ],
-          },
+          } : null,
           prior_packages: [],
         } as never;
       },
@@ -173,7 +193,10 @@ describe("SFL Brain MCP server", () => {
     };
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const hostedClient = new Client({ name: "package-write-client", version: "1.0.0" });
-    const hostedServer = createSflMcpServer(reader, { enablePilotWrites: true });
+    const hostedServer = createSflMcpServer(reader, {
+      enablePostPackageWrites: true,
+      trustedStorageOrigin: "https://project.supabase.co",
+    });
     await hostedServer.connect(serverTransport);
     await hostedClient.connect(clientTransport);
 
@@ -186,7 +209,7 @@ describe("SFL Brain MCP server", () => {
           base_caption: "Caption",
         },
       });
-      expect(calls).toEqual(["write", `read:${opportunityId}`]);
+      expect(calls).toEqual(["write", `read-package:${packageId}`]);
       expect(result.structuredContent).toMatchObject({
         post_package_context: { opportunity_id: opportunityId },
       });
@@ -194,8 +217,31 @@ describe("SFL Brain MCP server", () => {
       expect(serialized).not.toContain("storage_path");
       expect(serialized).not.toContain("created_by");
       expect(serialized).not.toContain("credential-must-not-leak");
-      expect(serialized).not.toContain("evil.example");
-      expect(serialized).toContain("project.supabase.co");
+      expect(result.structuredContent).toMatchObject({
+        post_package_context: {
+          active_package: {
+            assets: [
+              { asset: { signed_url: expect.stringContaining("?token=signed-jwt") } },
+              { asset: { signed_url: null } },
+              { asset: { signed_url: null } },
+              { asset: { signed_url: null } },
+            ],
+          },
+        },
+      });
+
+      includeSavedPackage = false;
+      const unverified = await hostedClient.callTool({
+        name: "create_post_package",
+        arguments: {
+          request_id: "a0000000-0000-4000-8000-000000000002",
+          opportunity_id: opportunityId,
+        },
+      });
+      expect(unverified.isError).toBe(true);
+      expect(unverified.content).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringMatching(/could not be verified/i) }),
+      ]));
     } finally {
       await hostedClient.close();
       await hostedServer.close();
