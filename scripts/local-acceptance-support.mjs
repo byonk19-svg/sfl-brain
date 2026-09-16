@@ -281,6 +281,25 @@ export async function removeStorageObjects(storage, objectPaths, batchSize = 100
   }
 }
 
+export function assertStoragePathsWithinPrefixes(objectPaths, prefixes) {
+  const allowedPrefixes = [...new Set(prefixes)];
+  if (!allowedPrefixes.length || allowedPrefixes.some((prefix) => !prefix.endsWith("/") || prefix.includes(".."))) {
+    throw new Error("Storage deletion requires exact disposable prefixes");
+  }
+  const unique = [...new Set(objectPaths)];
+  for (const objectPath of unique) {
+    if (
+      typeof objectPath !== "string" ||
+      objectPath.startsWith("/") ||
+      objectPath.includes("..") ||
+      !allowedPrefixes.some((prefix) => objectPath.startsWith(prefix) && objectPath.length > prefix.length)
+    ) {
+      throw new Error(`Storage object is outside every validated disposable prefix: ${String(objectPath)}`);
+    }
+  }
+  return unique;
+}
+
 export async function assertStoragePrefixEmpty(storage, prefix) {
   const remaining = await listStoragePrefixObjects(storage, prefix);
   if (remaining.length) throw new Error(`Storage objects remained under the disposable prefix: ${remaining.join(", ")}`);

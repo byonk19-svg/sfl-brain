@@ -6,6 +6,7 @@ import {
   assertExplicitStorageMissing,
   assertExplicitUserMissing,
   assertPortAvailable,
+  assertStoragePathsWithinPrefixes,
   assertStoragePrefixEmpty,
   buildCleanupSql,
   listStoragePrefixObjects,
@@ -110,4 +111,17 @@ test("Storage prefix proof rejects listing errors and surviving objects", async 
   await assert.rejects(listStoragePrefixObjects({ list: async () => ({ data: null, error: new Error("network") }) }, prefix), /list.*network/i);
   await assert.rejects(assertStoragePrefixEmpty({ list: async () => ({ data: [{ id: "file", name: "left.png" }], error: null }) }, prefix), /remained/i);
   assert.throws(() => storageFixturePrefix("../unsafe", "33333333-3333-4333-8333-333333333333"), /UUID/i);
+});
+
+test("Storage deletion scope accepts nested fixture objects and rejects foreign metadata paths", () => {
+  const prefix = storageFixturePrefix("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333");
+  assert.deepEqual(assertStoragePathsWithinPrefixes([
+    `${prefix}hero.png`,
+    `${prefix}nested/supporting.png`,
+    `${prefix}hero.png`,
+  ], [prefix]), [`${prefix}hero.png`, `${prefix}nested/supporting.png`]);
+  assert.throws(() => assertStoragePathsWithinPrefixes([
+    `${prefix}hero.png`,
+    "11111111-1111-4111-8111-111111111111/opportunities/99999999-9999-4999-8999-999999999999/foreign.png",
+  ], [prefix]), /outside.*disposable/i);
 });

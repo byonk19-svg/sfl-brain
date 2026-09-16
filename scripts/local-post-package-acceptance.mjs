@@ -7,6 +7,7 @@ import {
   assertExplicitStorageMissing,
   assertExplicitUserMissing,
   assertLoopback,
+  assertStoragePathsWithinPrefixes,
   assertStoragePrefixEmpty,
   buildCleanupSql,
   executeCleanupSql,
@@ -293,15 +294,24 @@ try {
     cleanupErrors.push(error);
   }
   const storage = service.storage.from("sfl-assets");
+  const storagePrefixes = fixtures.opportunityIds.map((recoveredOpportunityId) => storageFixturePrefix(workspaceId, recoveredOpportunityId));
   const prefixedStoragePaths = [];
-  for (const recoveredOpportunityId of fixtures.opportunityIds) {
+  for (const prefix of storagePrefixes) {
     try {
-      prefixedStoragePaths.push(...await listStoragePrefixObjects(storage, storageFixturePrefix(workspaceId, recoveredOpportunityId)));
+      prefixedStoragePaths.push(...await listStoragePrefixObjects(storage, prefix));
     } catch (error) {
       cleanupErrors.push(error);
     }
   }
-  fixtures.storagePaths = union(fixtures.storagePaths, prefixedStoragePaths);
+  try {
+    const storageCandidates = union(fixtures.storagePaths, prefixedStoragePaths);
+    fixtures.storagePaths = storageCandidates.length
+      ? assertStoragePathsWithinPrefixes(storageCandidates, storagePrefixes)
+      : [];
+  } catch (error) {
+    cleanupErrors.push(error);
+    fixtures.storagePaths = [];
+  }
   try { await removeStorageObjects(storage, fixtures.storagePaths); } catch (error) { cleanupErrors.push(error); }
   try {
     executeCleanupSql(local, buildCleanupSql({ workspaceId, ...fixtures }));
