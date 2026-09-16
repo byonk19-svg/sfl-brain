@@ -258,10 +258,86 @@ describe("PostPackageRepository", () => {
     ]);
   });
 
+  it("rejects an incomplete replacement update instead of clearing omitted fields", async () => {
+    const rpc = vi.fn();
+    const repository = new PostPackageRepository(
+      { rpc } as unknown as SupabaseClient,
+      workspaceId,
+      { userId: actorId, source: "website" },
+    );
+
+    await expect(repository.update({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      base_caption: null,
+      working_angle: null,
+    } as never)).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("maps a saved caption variant to exact public fields", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        id: "94000000-0000-4000-8000-000000000001",
+        workspace_id: workspaceId,
+        package_id: packageId,
+        audience: "sfl_page",
+        destination_id: null,
+        body: "Public caption",
+        status: "approved",
+        approved_by: actorId,
+        approved_at: updatedAt,
+        created_by: actorId,
+        updated_by: actorId,
+        created_source: "website",
+        updated_source: "website",
+        created_at: updatedAt,
+        updated_at: updatedAt,
+        storage_path: "must-not-leak",
+      },
+      error: null,
+    });
+    const repository = new PostPackageRepository(
+      { rpc } as unknown as SupabaseClient,
+      workspaceId,
+      { userId: actorId, source: "website" },
+    );
+
+    const saved = await repository.upsertVariant({
+      package_id: packageId,
+      expected_updated_at: updatedAt,
+      audience: "sfl_page",
+      body: "Public caption",
+      status: "approved",
+    });
+
+    expect(saved).toEqual({
+      id: "94000000-0000-4000-8000-000000000001",
+      audience: "sfl_page",
+      destination_id: null,
+      body: "Public caption",
+      status: "approved",
+      approved_by: actorId,
+      approved_at: updatedAt,
+      created_at: updatedAt,
+      updated_at: updatedAt,
+    });
+    expect(saved).not.toHaveProperty("workspace_id");
+    expect(saved).not.toHaveProperty("package_id");
+    expect(saved).not.toHaveProperty("created_by");
+    expect(saved).not.toHaveProperty("updated_by");
+    expect(saved).not.toHaveProperty("storage_path");
+  });
+
   it("passes development-tunnel request IDs to atomic publication recording", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {
         id: "70000000-0000-4000-8000-000000000001",
+        workspace_id: workspaceId,
+        content_opportunity_id: opportunityId,
+        destination_id: "20000000-0000-4000-8000-000000000001",
+        caption: "Internal snapshot",
+        created_at: updatedAt,
         post_package_id: packageId,
         caption_variant_id: "94000000-0000-4000-8000-000000000001",
         distribution_item_id: "93000000-0000-4000-8000-000000000001",
@@ -276,7 +352,7 @@ describe("PostPackageRepository", () => {
     });
     const publishedAt = "2026-09-15T13:00:00.000Z";
 
-    await repository.recordPost({
+    const saved = await repository.recordPost({
       package_id: packageId,
       distribution_item_id: "93000000-0000-4000-8000-000000000001",
       expected_updated_at: updatedAt,
@@ -296,6 +372,17 @@ describe("PostPackageRepository", () => {
       p_published_at: publishedAt,
       p_notes: "Recorded from local MCP",
     });
+    expect(saved).toEqual({
+      id: "70000000-0000-4000-8000-000000000001",
+      post_package_id: packageId,
+      caption_variant_id: "94000000-0000-4000-8000-000000000001",
+      distribution_item_id: "93000000-0000-4000-8000-000000000001",
+      package_updated_at: updatedAt,
+    });
+    expect(saved).not.toHaveProperty("workspace_id");
+    expect(saved).not.toHaveProperty("content_opportunity_id");
+    expect(saved).not.toHaveProperty("caption");
+    expect(saved).not.toHaveProperty("storage_path");
   });
 
   it("rejects missing connector request IDs before an RPC call", async () => {
@@ -326,6 +413,8 @@ describe("PostPackageRepository", () => {
       package_id: packageId,
       expected_updated_at: updatedAt,
       base_caption: "Updated",
+      working_angle: null,
+      notes: null,
     })).rejects.toThrow(/request ID/i);
     expect(rpc).not.toHaveBeenCalled();
   });

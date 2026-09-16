@@ -226,7 +226,7 @@ integration("local Supabase integration", () => {
     );
     expect(antonia?.posts).toHaveLength(2);
 
-    const mix = await createBrainService().getRecentContentMix();
+    const mix = await createBrainService().getRecentContentMix(100);
     expect(
       mix.filter((item) => item.opportunity_id === antonia?.opportunityId),
     ).toHaveLength(1);

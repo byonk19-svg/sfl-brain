@@ -11,6 +11,7 @@ import {
   packageAssetSelectionSchema,
   placeOpportunityHoldSchema,
   postPackageVariantSchema,
+  recordPostFromPackageSchema,
   releaseOpportunityHoldSchema,
   skipPostPackageDestinationSchema,
   updateDestinationSchema,
@@ -184,9 +185,21 @@ describe("post package validation", () => {
     expect(updatePostPackageSchema.parse({
       package_id: uuid(2),
       expected_updated_at: updatedAt,
-      base_caption: "Updated",
-    })).toMatchObject({ expected_updated_at: updatedAt });
-    expect(() => updatePostPackageSchema.parse({ package_id: uuid(2) })).toThrow();
+      base_caption: null,
+      working_angle: "Updated angle",
+      notes: null,
+    })).toMatchObject({
+      expected_updated_at: updatedAt,
+      base_caption: null,
+      working_angle: "Updated angle",
+      notes: null,
+    });
+    expect(() => updatePostPackageSchema.parse({
+      package_id: uuid(2),
+      expected_updated_at: updatedAt,
+      base_caption: null,
+      working_angle: null,
+    })).toThrow();
   });
 
   it("accepts audience variants and exact destination overrides", () => {
@@ -251,6 +264,15 @@ describe("post package validation", () => {
     expect(() => finishPostPackageSchema.parse({
       package_id: uuid(1), outcome: "closed",
     })).toThrow();
+  });
+
+  it("reports an invalid package publication date as a normal validation failure", () => {
+    expect(recordPostFromPackageSchema.safeParse({
+      package_id: uuid(1),
+      distribution_item_id: uuid(2),
+      expected_updated_at: updatedAt,
+      published_at: "not-a-date",
+    })).toMatchObject({ success: false });
   });
 
   it("validates destination creation and versioned updates", () => {

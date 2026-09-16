@@ -21,8 +21,8 @@ import type {
   setPostPackageAssetsSchema,
   setPostPackageDestinationsSchema,
   skipPostPackageDestinationSchema,
-  updatePostPackageSchema,
 } from "@/lib/validation";
+import { updatePostPackageSchema } from "@/lib/validation";
 
 export interface PostPackageMutationActor {
   userId: string;
@@ -81,6 +81,30 @@ function mapSavedPackage(row: JsonRecord): PostPackageSummary {
   return mapSummary(row as PackageGraphRow);
 }
 
+function mapCaptionVariant(row: JsonRecord): PostPackageCaptionVariant {
+  return {
+    id: String(row.id),
+    audience: row.audience as PostPackageCaptionVariant["audience"],
+    destination_id: (row.destination_id as string | null) ?? null,
+    body: String(row.body),
+    status: row.status as PostPackageCaptionVariant["status"],
+    approved_by: (row.approved_by as string | null) ?? null,
+    approved_at: (row.approved_at as string | null) ?? null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function mapRecordedPost(row: JsonRecord) {
+  return {
+    id: String(row.id),
+    post_package_id: String(row.post_package_id),
+    caption_variant_id: String(row.caption_variant_id),
+    distribution_item_id: String(row.distribution_item_id),
+    package_updated_at: String(row.package_updated_at),
+  };
+}
+
 export class PostPackageRepository {
   constructor(
     private readonly client: SupabaseClient,
@@ -110,17 +134,7 @@ export class PostPackageRepository {
   private async mapPackage(row: PackageGraphRow): Promise<PostPackage> {
     const captionVariants: PostPackageCaptionVariant[] = (
       row.post_package_caption_variants ?? []
-    ).map((variant) => ({
-      id: String(variant.id),
-      audience: variant.audience as PostPackageCaptionVariant["audience"],
-      destination_id: (variant.destination_id as string | null) ?? null,
-      body: String(variant.body),
-      status: variant.status as PostPackageCaptionVariant["status"],
-      approved_by: (variant.approved_by as string | null) ?? null,
-      approved_at: (variant.approved_at as string | null) ?? null,
-      created_at: String(variant.created_at),
-      updated_at: String(variant.updated_at),
-    }));
+    ).map(mapCaptionVariant);
 
     const assets = await Promise.all((row.post_package_assets ?? []).map(async (selection) => {
       const asset = selection.assets as JsonRecord;
@@ -213,20 +227,21 @@ export class PostPackageRepository {
   }
 
   async update(input: z.infer<typeof updatePostPackageSchema>): Promise<PostPackageSummary> {
+    const replacement = updatePostPackageSchema.parse(input);
     const result = await this.client.rpc("update_post_package", {
       p_workspace_id: this.workspaceId,
-      p_package_id: input.package_id,
-      ...this.mutationContext(input.request_id),
-      p_expected_updated_at: input.expected_updated_at,
-      p_base_caption: input.base_caption ?? null,
-      p_working_angle: input.working_angle ?? null,
-      p_notes: input.notes ?? null,
+      p_package_id: replacement.package_id,
+      ...this.mutationContext(replacement.request_id),
+      p_expected_updated_at: replacement.expected_updated_at,
+      p_base_caption: replacement.base_caption,
+      p_working_angle: replacement.working_angle,
+      p_notes: replacement.notes,
     });
     return mapSavedPackage(assertResult(result, "Update post package") as JsonRecord);
   }
 
   async upsertVariant(input: z.infer<typeof postPackageVariantSchema>): Promise<PostPackageCaptionVariant> {
-    return assertResult(await this.client.rpc("upsert_post_package_caption_variant", {
+    const result = assertResult(await this.client.rpc("upsert_post_package_caption_variant", {
       p_workspace_id: this.workspaceId,
       p_package_id: input.package_id,
       ...this.mutationContext(input.request_id),
@@ -236,7 +251,8 @@ export class PostPackageRepository {
       p_body: input.body,
       p_status: input.status,
       p_expected_updated_at: input.expected_updated_at,
-    }), "Save caption variant") as unknown as PostPackageCaptionVariant;
+    }), "Save caption variant") as JsonRecord;
+    return mapCaptionVariant(result);
   }
 
   async setAssets(input: z.infer<typeof setPostPackageAssetsSchema>): Promise<PostPackageSummary> {
@@ -274,7 +290,7 @@ export class PostPackageRepository {
   }
 
   async recordPost(input: z.infer<typeof recordPostFromPackageSchema>) {
-    return assertResult(await this.client.rpc("record_post_from_package", {
+    const result = assertResult(await this.client.rpc("record_post_from_package", {
       p_workspace_id: this.workspaceId,
       p_package_id: input.package_id,
       p_distribution_item_id: input.distribution_item_id,
@@ -282,13 +298,8 @@ export class PostPackageRepository {
       p_expected_updated_at: input.expected_updated_at,
       p_published_at: input.published_at,
       p_notes: input.notes ?? null,
-    }), "Record package publication") as unknown as {
-      id: string;
-      post_package_id: string;
-      caption_variant_id: string;
-      distribution_item_id: string;
-      package_updated_at: string;
-    };
+    }), "Record package publication") as JsonRecord;
+    return mapRecordedPost(result);
   }
 
   async finish(input: z.infer<typeof finishPostPackageSchema>): Promise<PostPackageSummary> {

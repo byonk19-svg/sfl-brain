@@ -269,9 +269,9 @@ export const updatePostPackageSchema = z.object({
   package_id: z.uuid(),
   request_id: z.uuid().nullish(),
   expected_updated_at: optimisticUpdatedAt,
-  base_caption: nullableBoundedText,
-  working_angle: optionalText,
-  notes: optionalText,
+  base_caption: z.string().trim().min(1).max(10_000).nullable(),
+  working_angle: z.string().trim().min(1).max(2_000).nullable(),
+  notes: z.string().trim().min(1).max(2_000).nullable(),
 });
 
 export const postPackageVariantSchema = z.object({
@@ -352,7 +352,11 @@ export const recordPostFromPackageSchema = z.object({
   distribution_item_id: z.uuid(),
   request_id: z.uuid().nullish(),
   expected_updated_at: optimisticUpdatedAt,
-  published_at: z.string().min(1).transform((value) => new Date(value).toISOString()),
+  published_at: z
+    .string()
+    .min(1)
+    .refine((value) => Number.isFinite(Date.parse(value)), "Enter a valid publication date")
+    .transform((value) => new Date(value).toISOString()),
   notes: optionalText,
 });
 
