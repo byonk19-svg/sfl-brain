@@ -44,7 +44,7 @@ Verified on September 18, 2026. This handoff supersedes the production state in 
 - A fresh MCP client re-read the saved terminal package.
 - Persisted package and variant audit fields recorded the disposable member and `chatgpt_connector` source.
 - Structured output contained no raw Storage paths, credentials, or internal actor fields.
-- Exact cleanup removed the package, variants, selections, distribution rows, opportunity, asset metadata, destinations, request-audit rows, workspace membership, Auth user, and temporary OAuth client. Marker and ID checks proved no acceptance fixture remained.
+- Exact cleanup removed the package, variants, selections, distribution rows, opportunity, asset metadata, destinations, request-audit rows, workspace membership, and Auth user. The temporary OAuth client was deleted and has zero active records; Supabase Auth retains its row with `deleted_at` set as a soft-delete audit record.
 
 ## ChatGPT connector refresh
 
