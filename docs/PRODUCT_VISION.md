@@ -58,7 +58,7 @@ The current product provides:
 - an active Backlog plus an On hold lifecycle with reasons, release conditions, optional review dates, history, and manual release;
 - product, listing, affiliate-link, asset, publication, performance, and manually recorded Revival Radar facts;
 - a private authenticated website;
-- an always-on OAuth-protected ChatGPT connector with eight read tools and six confirmed, non-destructive write tools.
+- an always-on OAuth-protected ChatGPT connector with nine read tools and thirteen confirmed, non-destructive write tools.
 
 Feature-level behavior belongs in the current specifications and code, not in this vision document.
 
